@@ -1,13 +1,15 @@
-BLANK = bytes([0] * (1 << 11))
+#: Control words for each possible control state.
+#: Should be a max of 24 bits.
+CONTENT = [0] * (1 << 11)
 
 def main():
-    blank("src/ctrl1.rom")
-    blank("src/ctrl2.rom")
-    blank("src/ctrl3.rom")
+    wb("src/ctrl1.rom", map(lambda x: x & 0xFF, CONTENT))
+    wb("src/ctrl2.rom", map(lambda x: (x >> 8) & 0xFF, CONTENT))
+    wb("src/ctrl3.rom", map(lambda x: (x >> 16) & 0xFF, CONTENT))
         
-def blank(file: str):
+def wb(file: str, content: [int]):
     with open(file, 'wb') as f:
-        f.write(BLANK)
+        f.write(bytes(content))
 
 if __name__ == "__main__":
     main()
