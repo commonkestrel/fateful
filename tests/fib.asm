@@ -11,6 +11,7 @@ fib:
     mv r0, r1
     mv r1, r3
     dec r2
-    jnz r2, [.loop]
+    lda [.loop]
+    jnz r2
 .halt:
     jmp [.halt]
