@@ -1,6 +1,7 @@
 use std::{
     fmt,
     io::{Read, Write},
+    sync::OnceLock,
     str::FromStr,
     time::{Duration, SystemTime, SystemTimeError},
 };
@@ -13,12 +14,11 @@ use async_std::{
 use bitflags::bitflags;
 use clap::Args;
 use clio::Input;
-use once_cell::sync::{Lazy, OnceCell};
 use thiserror::Error;
 
-const CTRL_ROM1: &[u8; 1 << 11] = include_bytes!("ctrl1.rom");
-const CTRL_ROM2: &[u8; 1 << 11] = include_bytes!("ctrl2.rom");
-const CTRL_ROM3: &[u8; 1 << 11] = include_bytes!("ctrl3.rom");
+const CTRL_LOW: &[u8; 1 << 10] = include_bytes!("ctrl_low.rom");
+const CTRL_MID: &[u8; 1 << 10] = include_bytes!("ctrl_mid.rom");
+const CTRL_HIGH: &[u8; 1 << 10] = include_bytes!("ctrl_high.rom");
 
 #[derive(Error, Debug)]
 pub enum EmulatorError {
@@ -43,43 +43,65 @@ pub struct EmulatorArgs {
     input: Input,
 }
 
+// TODO: Figure out how to work `IN` and `OUT` into 24 bits
 bitflags! {
+    /// Representation of the CPU Control Word
+    /// 
+    /// Find more in-depth explanations of flags in `Arch.md`.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     struct ControlWord: u32 {
-        /// ALU Add
-        const ADD = 1 << 0;
-        /// ALU Subtract
-        const SUB = 1 << 1;
-        /// ALU Nand
-        const NAND = 1 << 2;
-        /// ALU Or
-        const OR = 1 << 3;
-        /// ALU Bus In
-        const AI = 1 << 4;
-        /// ALU Bus Out
-        const AO = 1 << 5;
-        /// Register Bank Bus In
-        const RI = 1 << 9;
-        /// Register Bank Bus Out
-        const RO = 1 << 10;
-        /// Stack Pointer Increment
-        const SPI = 1 << 11;
-        /// Stack Pointer Decrement
-        const SPD = 1 << 12;
-        /// Program Counter Increment
+        /// ALU opcode low 
+        const AOL = 1 << 0;
+        /// ALU opcode middle
+        const AOM = 1 << 1;
+        /// ALU opcode high
+        const AOH = 1 << 2;
+        /// ALU active
+        const AA = 1 << 3;
+        /// ALU load primary
+        const ALP = 1 << 4;
+        /// ALU load secondary
+        const ALS = 1 << 5;
+        /// Register bank bus in
+        const RI = 1 << 6;
+        /// Register bank bus out
+        const RO = 1 << 7;
+        /// Instruction builtin register address
+        const RBA = 1 << 8;
+        /// Instruction primary register address
+        const RPA = 1 << 9;
+        /// Stack pointer increment
+        const SPI = 1 << 10;
+        /// Stack pointer decrement
+        const SPD = 1 << 11;
+        /// Clock reset
+        const CR = 1 << 12;
+        /// Program counter increment
         const PCI = 1 << 13;
-        /// Set Program Counter
-        const SPC = 1 << 14;
+        /// Set program counter
+        const JNZ = 1 << 14;
         /// Load instruction
         const LI = 1 << 15;
-        /// Load first byte
-        const LF = 1 << 16;
-        /// Load second byte
-        const LS = 1 << 17;
+        /// Program out
+        const PO = 1 << 16;
+        /// Swap Temp Register
+        const ST = 1 << 17;
+        /// Transfer HIGH/LOW
+        const THL = 1 << 18;
+        /// Load Address
+        const LA = 1 << 19;
+        /// Store Address
+        const SA = 1 << 20;
+        /// ADDRESS low in
+        const AL = 1 << 21;
+        /// ADDRESS high in
+        const AH = 1 << 22;
+        /// Load Stack Pointer
+        const LSP = 1 << 23;
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct Adc {
     primary: u8,
     secondary: u8,
@@ -94,7 +116,25 @@ impl Default for Adc {
     }
 }
 
-#[derive(Debug, Clone)]
+bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    struct Flags: u8 {
+        /// Zero flag
+        const Z = 1 << 0;
+        /// Carry flag
+        const C = 1 << 1;
+        /// Less than flag
+        const L = 1 << 2;
+        /// Equal flag
+        const E = 1 << 3;
+        /// Greater than flag
+        const G = 1 << 4;
+        /// Halt flag
+        const H = 1 << 7;
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct RegBank {
     a: u8,
     b: u8,
@@ -103,7 +143,8 @@ struct RegBank {
     e: u8,
     h: u8,
     l: u8,
-    f: u8,
+    f: Flags,
+    temp: u8,
 }
 
 impl RegBank {
@@ -116,7 +157,7 @@ impl RegBank {
             4 => self.e,
             5 => self.h,
             6 => self.l,
-            7 => self.f,
+            7 => self.f.bits(),
             _ => unreachable!(),
         }
     }
@@ -130,7 +171,7 @@ impl RegBank {
             4 => self.e = val,
             5 => self.h = val,
             6 => self.l = val,
-            7 => self.f = val,
+            7 => self.f = Flags::from_bits_retain(val),
             _ => unreachable!(),
         }
     }
@@ -146,7 +187,8 @@ impl Default for RegBank {
             e: 0,
             h: 0,
             l: 0,
-            f: 0,
+            f: Flags::empty(),
+            temp: 0,
         }
     }
 }
@@ -190,6 +232,30 @@ enum Instruction {
     Out,
 }
 
+impl From<u8> for Instruction {
+    fn from(val: u8) -> Self {
+        match val {
+            0x0 => Instruction::Add,
+            0x1 => Instruction::Sub,
+            0x2 => Instruction::Adc,
+            0x3 => Instruction::Sbc,
+            0x4 => Instruction::Nand,
+            0x5 => Instruction::Or,
+            0x6 => Instruction::Cmp,
+            0x7 => Instruction::Mv,
+            0x8 => Instruction::Ld,
+            0x9 => Instruction::St,
+            0xA => Instruction::Lda,
+            0xB => Instruction::Push,
+            0xC => Instruction::Pop,
+            0xD => Instruction::Jnz,
+            0xE => Instruction::In,
+            0xF => Instruction::Out,
+            _ => unreachable!(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Register {
     A,
@@ -202,13 +268,27 @@ enum Register {
     F,
 }
 
+impl From<u8> for Register {
+    fn from(val: u8) -> Self {
+        match val {
+            0 => Register::A,
+            1 => Register::B,
+            2 => Register::C,
+            3 => Register::D,
+            4 => Register::E,
+            5 => Register::H,
+            6 => Register::L,
+            7 => Register::F,
+            _ => unreachable!(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct Control {
     instruction: Instruction,
     immediate: bool,
     register: Register,
-    primary: u8,
-    secondary: u8,
     clock: u8,
 }
 
@@ -219,8 +299,6 @@ impl Default for Control {
             instruction: Instruction::Add,
             immediate: false,
             register: Register::A,
-            primary: 0,
-            secondary: 0,
             clock: 0,
         }
     }
@@ -242,11 +320,19 @@ struct State {
 }
 
 impl State {
-    async fn tick(&mut self) -> Result<(), EmulatorError> {
-        if self.cw().contains(ControlWord::LI) {}
+    async fn tick(&mut self) -> Result<bool, EmulatorError> {
+        
+        if self.cw().contains(ControlWord::LI) {
+            let byte = self.program[self.pc as usize];
+            self.ctrl.instruction = (byte >> 4).into();
+            self.ctrl.immediate = (byte & 0b0000_1000) != 0;
+            self.ctrl.register = (byte & 0b0000_0111).into();
+        }
 
-        self.ctrl.clock += 1;
-        Ok(())
+        
+
+        self.ctrl.clock = self.ctrl.clock.wrapping_add(1);
+        Ok(true)
     }
 
     fn cw(&self) -> ControlWord {
@@ -254,9 +340,9 @@ impl State {
             | (self.ctrl.immediate as u8) << 4
             | self.ctrl.clock) as usize;
 
-        let low = CTRL_ROM1[index] as u32;
-        let mid = CTRL_ROM2[index] as u32;
-        let high = CTRL_ROM3[index] as u32;
+        let low = CTRL_LOW[index] as u32;
+        let mid = CTRL_MID[index] as u32;
+        let high = CTRL_HIGH[index] as u32;
 
         ControlWord::from_bits_retain(low | (mid << 8) | (high << 16))
     }
@@ -309,7 +395,7 @@ enum DoubleCmd {
     Write,
 }
 
-static STATE: OnceCell<RwLock<State>> = OnceCell::new();
+static STATE: OnceLock<RwLock<State>> = OnceLock::new();
 
 pub async fn emulate(mut args: EmulatorArgs) -> Result<(), EmulatorError> {
     let mut program: Box<[u8]> = vec![0; 1 << 16].into_boxed_slice();
@@ -337,7 +423,7 @@ pub async fn emulate(mut args: EmulatorArgs) -> Result<(), EmulatorError> {
             Err(TryRecvError::Empty) => {}
         }
 
-        if STATE.wait().read().await.quit {
+        if STATE.get().ok_or(EmulatorError::OnceEmpty)?.read().await.quit {
             break;
         }
 
@@ -350,18 +436,38 @@ pub async fn emulate(mut args: EmulatorArgs) -> Result<(), EmulatorError> {
         {
             if prev.elapsed()? >= speed {
                 prev = SystemTime::now();
-                STATE
+                let halted = STATE
                     .get()
                     .ok_or(EmulatorError::OnceEmpty)?
                     .write()
                     .await
                     .tick()
                     .await?;
+                
+                if halted {
+                    halt().await?;
+                }
             } else {
                 prev = SystemTime::now();
             }
         }
     }
+
+    Ok(())
+}
+
+async fn halt() -> Result<(), EmulatorError> {
+    STATE
+        .get()
+        .ok_or(EmulatorError::OnceEmpty)?
+        .write()
+        .await
+        .speed = None;
+
+    println!("\n\
+        INFO: CPU halt detected\
+        INFO: stopping clock\
+        > ");
 
     Ok(())
 }
@@ -401,13 +507,17 @@ async fn handle_input(input: String) -> Result<(), EmulatorError> {
                     .speed
                     .is_none()
                 {
-                    STATE
+                    let halted = STATE
                         .get()
                         .ok_or(EmulatorError::OnceEmpty)?
                         .write()
                         .await
                         .tick()
-                        .await?
+                        .await?;
+
+                    if halted {
+                        eprintln!("INVALID COMMAND: CPU is halted, the clock cannot be stepped")
+                    }
                 } else {
                     eprintln!("INVALID COMMAND: STEP can only be used if the CPU is stopped")
                 }
@@ -443,7 +553,8 @@ fn help() {
         POKE <addr>, <val>  : Sets the value at the memory address `addr` to `val`\n\
         READ <port>         : Gets the value on the specified port `port`\n\
         WRITE <port>, <val> : Writes the value `val` to the specified port `port`\n\
-        RUN <speed>         : Starts running the CPU at the specified `speed` (in hertz)\n\
+        RUN <speed>         : Starts running the CPU at the specified `speed` (in hertz)\n
+                      If `speed` is zero, the emulator will run as fast as possible.
         DUMP                : Dumps the current machine state\n\
         STEP                : Pulses the clock a single time (only available if the CPU is stopped)\n\
         STOP                : Stops the CPU clock\n\
@@ -535,12 +646,18 @@ async fn single_arg(cmd: SingleCmd, arg: &str) -> Result<(), EmulatorError> {
                 }
             };
 
+            let duration = if speed == 0 {
+                Duration::ZERO
+            } else {
+                Duration::from_secs(1) / speed
+            };
+
             STATE
                 .get()
                 .ok_or(EmulatorError::OnceEmpty)?
                 .write()
                 .await
-                .speed = Some(Duration::from_secs(1) / speed);
+                .speed = Some(duration);
         }
     }
 
