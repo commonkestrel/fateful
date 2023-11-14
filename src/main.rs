@@ -2,6 +2,8 @@ mod emulator;
 use emulator::{EmulatorArgs, EmulatorError};
 mod deploy;
 use deploy::{DeployArgs, DeployError};
+#[cfg(test)]
+mod tests;
 
 use clap::{Parser, Subcommand};
 use env_logger::Env;
