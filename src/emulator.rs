@@ -15,6 +15,7 @@ use bitflags::bitflags;
 use clap::Args;
 use clio::Input;
 use thiserror::Error;
+use modular_bitfield::{bitfield, BitfieldSpecifier};
 
 const CTRL_LOW: &[u8; 1 << 10] = include_bytes!("ctrl_low.rom");
 const CTRL_MID: &[u8; 1 << 10] = include_bytes!("ctrl_mid.rom");
@@ -212,7 +213,7 @@ impl fmt::Display for RegBank {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, BitfieldSpecifier)]
 enum Instruction {
     Add,
     Sub,
@@ -256,7 +257,7 @@ impl From<u8> for Instruction {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, BitfieldSpecifier)]
 enum Register {
     A,
     B,
@@ -284,11 +285,19 @@ impl From<u8> for Register {
     }
 }
 
-#[derive(Debug, Clone)]
-struct Control {
+#[bitfield]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct InstructionHeader {
+    #[bits = 4]
     instruction: Instruction,
     immediate: bool,
+    #[bits = 3]
     register: Register,
+}
+
+#[derive(Debug, Clone)]
+struct Control {
+    head: InstructionHeader,
     clock: u8,
 }
 
@@ -296,9 +305,7 @@ impl Default for Control {
     fn default() -> Self {
         // CPU starts up with 0x00 in all control registers
         Control {
-            instruction: Instruction::Add,
-            immediate: false,
-            register: Register::A,
+            head: InstructionHeader::new(),
             clock: 0,
         }
     }
@@ -321,23 +328,25 @@ struct State {
 
 impl State {
     async fn tick(&mut self) -> Result<bool, EmulatorError> {
+        // rising edge
         
         if self.cw().contains(ControlWord::LI) {
             let byte = self.program[self.pc as usize];
-            self.ctrl.instruction = (byte >> 4).into();
-            self.ctrl.immediate = (byte & 0b0000_1000) != 0;
-            self.ctrl.register = (byte & 0b0000_0111).into();
+            self.ctrl.head = InstructionHeader::from_bytes([byte]);
         }
 
-        
-
-        self.ctrl.clock = self.ctrl.clock.wrapping_add(1);
+        // falling edge
+        if self.cw().contains(ControlWord::CR) {
+            self.ctrl.clock = 0;
+        } else {
+            self.ctrl.clock = self.ctrl.clock.wrapping_add(1);
+        }
         Ok(true)
     }
 
     fn cw(&self) -> ControlWord {
-        let index = ((self.ctrl.instruction as u8) << 5
-            | (self.ctrl.immediate as u8) << 4
+        let index = ((self.ctrl.head.instruction() as u8) << 5
+            | (self.ctrl.head.immediate() as u8) << 4
             | self.ctrl.clock) as usize;
 
         let low = CTRL_LOW[index] as u32;
