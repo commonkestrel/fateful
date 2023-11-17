@@ -1,4 +1,4 @@
-//! Deploys assembly programs to the CPU
+//! Deploys assembled programs to the CPU
 //!
 //! Will be completed once the protocol is solidified.
 
