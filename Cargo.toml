@@ -13,10 +13,15 @@ rust-version = "1.70.0"
 async-std = { version="1", features = ["attributes"] }
 bitflags = "2.4"
 clap = { version = "4.4", features = ["derive"] }
+clap-verbosity-flag = "2.1"
 clio = { version = "0.3", features = ["clap-parse"] }
-env_logger = "0.10.1"
-log = "0.4.20"
-modular-bitfield = "0.11.2"
+colored = "2"
+env_logger = "0.10"
+log = "0.4"
+logos = "0.13"
+modular-bitfield = "0.11"
+once_cell = "1.18"
+regex = "1.10"
 shadow-rs = "0.24"
 thiserror = "1"
 
