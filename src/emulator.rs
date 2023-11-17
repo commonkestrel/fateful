@@ -1,8 +1,8 @@
 use std::{
     fmt,
     io::{Read, Write},
-    sync::OnceLock,
     str::FromStr,
+    sync::OnceLock,
     time::{Duration, SystemTime, SystemTimeError},
 };
 
@@ -14,8 +14,8 @@ use async_std::{
 use bitflags::bitflags;
 use clap::Args;
 use clio::Input;
-use thiserror::Error;
 use modular_bitfield::{bitfield, BitfieldSpecifier};
+use thiserror::Error;
 
 const CTRL_LOW: &[u8; 1 << 10] = include_bytes!("ctrl_low.rom");
 const CTRL_MID: &[u8; 1 << 10] = include_bytes!("ctrl_mid.rom");
@@ -47,11 +47,11 @@ pub struct EmulatorArgs {
 // TODO: Figure out how to work `IN` and `OUT` into 24 bits
 bitflags! {
     /// Representation of the CPU Control Word
-    /// 
+    ///
     /// Find more in-depth explanations of flags in `Arch.md`.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     struct ControlWord: u32 {
-        /// ALU opcode low 
+        /// ALU opcode low
         const AOL = 1 << 0;
         /// ALU opcode middle
         const AOM = 1 << 1;
@@ -329,7 +329,7 @@ struct State {
 impl State {
     async fn tick(&mut self) -> Result<bool, EmulatorError> {
         // rising edge
-        
+
         if self.cw().contains(ControlWord::LI) {
             let byte = self.program[self.pc as usize];
             self.ctrl.head = InstructionHeader::from_bytes([byte]);
@@ -432,7 +432,13 @@ pub async fn emulate(mut args: EmulatorArgs) -> Result<(), EmulatorError> {
             Err(TryRecvError::Empty) => {}
         }
 
-        if STATE.get().ok_or(EmulatorError::OnceEmpty)?.read().await.quit {
+        if STATE
+            .get()
+            .ok_or(EmulatorError::OnceEmpty)?
+            .read()
+            .await
+            .quit
+        {
             break;
         }
 
@@ -452,7 +458,7 @@ pub async fn emulate(mut args: EmulatorArgs) -> Result<(), EmulatorError> {
                     .await
                     .tick()
                     .await?;
-                
+
                 if halted {
                     halt().await?;
                 }
@@ -473,10 +479,12 @@ async fn halt() -> Result<(), EmulatorError> {
         .await
         .speed = None;
 
-    println!("\n\
+    println!(
+        "\n\
         INFO: CPU halt detected\
         INFO: stopping clock\
-        > ");
+        > "
+    );
 
     Ok(())
 }
