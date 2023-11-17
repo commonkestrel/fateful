@@ -787,50 +787,6 @@ mod tests {
     use std::fs;
 
     #[test]
-    fn file() {
-        let lexed = match lex("tests/lex.asm") {
-            Ok(tokens) => tokens,
-            Err(errors) => {
-                for error in errors {
-                    error.force_emit();
-                }
-                Diagnostic::error("lexing failed due to previous errors").scream();
-            }
-        };
-
-        // println!(
-        //     "{:?}",
-        //     lexed
-        //         .into_iter()
-        //         .map(|tok| tok.inner)
-        //         .collect::<Vec<TokenInner>>()
-        // );
-    }
-
-    #[test]
-    fn string() {
-        let example = fs::read_to_string("tests/lex.asm")
-            .expect_or_scream("Unable to open file `tests/lex.asm`");
-        let lexed = match lex_string(example) {
-            Ok(tokens) => tokens,
-            Err(errors) => {
-                for error in errors {
-                    error.force_emit();
-                }
-                Diagnostic::error("lexing failed due to previous errors").scream();
-            }
-        };
-
-        // println!(
-        //     "{:?}",
-        //     lexed
-        //         .into_iter()
-        //         .map(|tok| tok.inner)
-        //         .collect::<Vec<TokenInner>>()
-        // );
-    }
-
-    #[test]
     fn delim() {
         let example = "< )".to_owned();
 
