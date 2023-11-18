@@ -64,6 +64,8 @@ async fn main() -> Result<(), Error> {
                     for err in errors {
                         err.emit();
                     }
+
+                    return Err(Error::Assembler);
                 }
             }
         }
