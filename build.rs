@@ -13,18 +13,12 @@ use thiserror::Error;
 #[logos(skip r";[^\n]*")]
 #[logos(skip r"[ \r\t\f]+")]
 enum Token {
-    #[regex(r"[._a-zA-Z][_a-zA-Z0-9]*:?", Token::ident)]
+    #[regex(r"[._a-zA-Z][_a-zA-Z0-9]*:?", |lex| lex.slice().to_owned())]
     Ident(String),
     #[token("|")]
     Pipe,
     #[token("\n")]
     Newline,
-}
-
-impl Token {
-    fn ident(lex: &mut Lexer<Token>) -> String {
-        lex.slice().to_owned()
-    }
 }
 
 #[derive(Debug, Error)]
