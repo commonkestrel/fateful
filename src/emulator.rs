@@ -17,9 +17,9 @@ use clio::Input;
 use modular_bitfield::{bitfield, BitfieldSpecifier};
 use thiserror::Error;
 
-const CTRL_LOW: &[u8; 1 << 10] = include_bytes!("ctrl_low.rom");
-const CTRL_MID: &[u8; 1 << 10] = include_bytes!("ctrl_mid.rom");
-const CTRL_HIGH: &[u8; 1 << 10] = include_bytes!("ctrl_high.rom");
+const CTRL_LOW: &[u8; 1 << 8] = include_bytes!(concat!(env!("OUT_DIR"), "/ctrl_low.rom"));
+const CTRL_MID: &[u8; 1 << 8] = include_bytes!(concat!(env!("OUT_DIR"), "/ctrl_mid.rom"));
+const CTRL_HIGH: &[u8; 1 << 8] = include_bytes!(concat!(env!("OUT_DIR"), "/ctrl_high.rom"));
 
 #[derive(Error, Debug)]
 pub enum EmulatorError {

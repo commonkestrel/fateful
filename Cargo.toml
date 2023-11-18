@@ -27,3 +27,7 @@ thiserror = "1"
 
 [build-dependencies]
 shadow-rs = "0.24"
+logos = "0.13"
+bitflags = "2.4"
+anyhow = "1"
+thiserror = "1"
