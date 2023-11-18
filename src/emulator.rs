@@ -142,10 +142,9 @@ struct RegBank {
     c: u8,
     d: u8,
     e: u8,
+    f: u8,
     h: u8,
     l: u8,
-    f: Flags,
-    temp: u8,
 }
 
 impl RegBank {
@@ -156,9 +155,9 @@ impl RegBank {
             2 => self.c,
             3 => self.d,
             4 => self.e,
-            5 => self.h,
-            6 => self.l,
-            7 => self.f.bits(),
+            5 => self.f,
+            6 => self.h,
+            7 => self.l,
             _ => unreachable!(),
         }
     }
@@ -170,9 +169,9 @@ impl RegBank {
             2 => self.c = val,
             3 => self.d = val,
             4 => self.e = val,
-            5 => self.h = val,
-            6 => self.l = val,
-            7 => self.f = Flags::from_bits_retain(val),
+            5 => self.f = val,
+            6 => self.h = val,
+            7 => self.l = val,
             _ => unreachable!(),
         }
     }
@@ -186,10 +185,9 @@ impl Default for RegBank {
             c: 0,
             d: 0,
             e: 0,
+            f: 0,
             h: 0,
             l: 0,
-            f: Flags::empty(),
-            temp: 0,
         }
     }
 }
@@ -321,7 +319,6 @@ struct State {
     bank: RegBank,
     speed: Option<Duration>,
     quit: bool,
-    ports: [u8; 1 << 8],
     mem: Box<[u8]>,
     program: Box<[u8]>,
 }
@@ -368,7 +365,6 @@ impl State {
             bank: RegBank::default(),
             speed: None,
             quit: false,
-            ports: [0; 1 << 8],
             mem: vec![0; 1 << 16].into_boxed_slice(),
             program,
         }
@@ -393,7 +389,6 @@ impl fmt::Display for State {
 enum SingleCmd {
     Get,
     Peek,
-    Read,
     Run,
 }
 
@@ -401,7 +396,6 @@ enum SingleCmd {
 enum DoubleCmd {
     Set,
     Poke,
-    Write,
 }
 
 static STATE: OnceLock<RwLock<State>> = OnceLock::new();
@@ -496,8 +490,6 @@ async fn handle_input(input: String) -> Result<(), EmulatorError> {
             "SET" => double_arg(DoubleCmd::Set, args).await?,
             "PEEK" => single_arg(SingleCmd::Peek, args).await?,
             "POKE" => double_arg(DoubleCmd::Poke, args).await?,
-            "READ" => single_arg(SingleCmd::Read, args).await?,
-            "WRITE" => double_arg(DoubleCmd::Write, args).await?,
             "RUN" => single_arg(SingleCmd::Run, args).await?,
             _ => eprintln!("UNRECOGNIZED COMMAND: {cmd}"),
         },
@@ -568,8 +560,6 @@ fn help() {
         GET <reg>           : Gets the value in the register `reg`\n\
         PEEK <addr>         : Gets the value at the memory address `addr`\n\
         POKE <addr>, <val>  : Sets the value at the memory address `addr` to `val`\n\
-        READ <port>         : Gets the value on the specified port `port`\n\
-        WRITE <port>, <val> : Writes the value `val` to the specified port `port`\n\
         RUN <speed>         : Starts running the CPU at the specified `speed` (in hertz)\n
                       If `speed` is zero, the emulator will run as fast as possible.
         DUMP                : Dumps the current machine state\n\
@@ -615,26 +605,7 @@ async fn single_arg(cmd: SingleCmd, arg: &str) -> Result<(), EmulatorError> {
                     .bank
                     .get_reg(reg)
             )
-        }
-        SingleCmd::Read => {
-            let port = match parse_u8(arg.trim()) {
-                Ok(reg) => reg,
-                Err(_) => {
-                    eprintln!("INVALID ARGUMENT: unable to parse register number");
-                    return Ok(());
-                }
-            };
-
-            println!(
-                "PORT {port}: {:#04X}",
-                STATE
-                    .get()
-                    .ok_or(EmulatorError::OnceEmpty)?
-                    .read()
-                    .await
-                    .ports[port as usize]
-            );
-        }
+        },
         SingleCmd::Peek => {
             let addr = match parse_u16(arg.trim()) {
                 Ok(addr) => addr,
@@ -653,7 +624,7 @@ async fn single_arg(cmd: SingleCmd, arg: &str) -> Result<(), EmulatorError> {
                     .await
                     .mem[addr as usize]
             );
-        }
+        },
         SingleCmd::Run => {
             let speed = match parse_u32(arg.trim()) {
                 Ok(speed) => speed,
@@ -675,7 +646,7 @@ async fn single_arg(cmd: SingleCmd, arg: &str) -> Result<(), EmulatorError> {
                 .write()
                 .await
                 .speed = Some(duration);
-        }
+        },
     }
 
     Ok(())
@@ -729,7 +700,7 @@ async fn double_arg(cmd: DoubleCmd, args: &str) -> Result<(), EmulatorError> {
                 .await
                 .bank
                 .set_reg(reg, value);
-        }
+        },
         DoubleCmd::Poke => {
             let addr = match parse_u16(arg1.trim()) {
                 Ok(addr) => addr,
@@ -753,31 +724,7 @@ async fn double_arg(cmd: DoubleCmd, args: &str) -> Result<(), EmulatorError> {
                 .write()
                 .await
                 .mem[addr as usize] = value;
-        }
-        DoubleCmd::Write => {
-            let port = match parse_u8(arg1.trim()) {
-                Ok(reg) => reg,
-                Err(_) => {
-                    eprintln!("INVALID ARGUMENT: unable to parse register number");
-                    return Ok(());
-                }
-            };
-
-            let value = match parse_u8(arg2.trim()) {
-                Ok(val) => val,
-                Err(_) => {
-                    eprintln!("INVALID ARGUMENT: unable to parse value");
-                    return Ok(());
-                }
-            };
-
-            STATE
-                .get()
-                .ok_or(EmulatorError::OnceEmpty)?
-                .write()
-                .await
-                .ports[port as usize] = value;
-        }
+        },
     }
 
     Ok(())
