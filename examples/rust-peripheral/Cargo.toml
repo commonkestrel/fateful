@@ -1,0 +1,13 @@
+[package]
+name = "example-peripheral"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "rust_peripheral"
+crate-type = ["rlib", "cdylib"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+byte-strings = "0.3.1"
