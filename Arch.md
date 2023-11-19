@@ -1,8 +1,12 @@
 # Architecture
 
+The F8ful CPU is a custom CPU designed to run at 1 MHz,
+though it can theoretically run up to 2.5 MHz.
+It is inspired by Ben Eater's [8-bit computer](https://eater.net/8bit) and the [JDH-8](https://github.com/jdah/jdh-8).
+
 ## Control Word
 
-The control word toggles operations inside the CPU,
+The control word contains flags that control operations inside the CPU,
 and enables CPU control based on instructions.
 
 This control word changes every clock cycle,
@@ -14,11 +18,11 @@ The control word is split into 3 bytes,
 just because I couldn't find any EEPROMs with a 24-bit word.
 It is layed out like so:
 
-|           | `B7` | `B6` | `B5` | `B4` | `B3` | `B2` | `B1` | `B0` |
-|-----------|------|------|------|------|------|------|------|------|
-| Low Byte  | `RPA` | `RBA` | `RO` | `RI` | `AO` | `AOH` | `AOM` | `AOL` |
-| Mid Byte  | `` | `` | `` | `` | `` | `` | `` | `` |
-| High Byte | `` | `` | `` | `` | `` | `` | `` | `` |
+|           | Bit 7 | Bit 6 | Bit 5 | Bit 4 | Bit 3 | Bit 2 | Bit 1 | Bit 0 |
+|-----------|-------|-------|-------|-------|-------|-------|-------|-------|
+| Low Byte  | `RPA` | `RBA` | `RBO` | `RBI` |  `AO` | `AOH` | `AOM` | `AOL` |
+| Mid Byte  |  `SR` |  `PO` |  `LI` | `JNZ` | `PCI` |  `CR` | `SPD` | `SPI` |
+| High Byte |  ` `  |  ` `  | `LSP` | `AHI` | `ALI` |  `SA` |  `LA` | `THL` |
 
 ### ALU Opcode
 
@@ -47,11 +51,25 @@ These need a bit more explanation.
 
 - `NOP` (No Op) does nothing.
 - `CMP` (Compare) compares the integers in the primary and secondary register,\
-  setting the `L`, `E`, and `G` bits in the Flags register respectively.
+  setting the `L`, `E`, and `G` bits in the Status Register respectively.
 - `CZ` (Check Zero) checks if the number in the primary register is `0`,\
-  setting the `Z` bit in the Flags register respectively.
+  setting the `Z` bit in the Status Register respectively.
 - `ALP` (ALU Load Primary) loads the ALU primary register from the bus.
 - `ALS` (ALU Load Secondary) loads the ALU secondary register from the bus.
+
+### Control Flags
+
+The rest of the flags control individual operations in the CPU.
+These operations are listed here:
+
+- `RBI` (Register Bank In): Loads data from the bus into the current selected register.
+- `RBO` (Register Bank Out): Outputs contents of the current selected register to the bus.
+- `RSB` (Register Select Built-in): Selects the register indexed in the loaded instruction.
+- `RSP` (Register Select Primary): Selects the register indexed in the current program byte.
+- `SPI` (Stack Pointer Increment): Increments the Stack Pointer.
+- `SPD` (Stack Pointer Decrement): Increments the Stack Pointer.
+- `CR` (Clock Reset): Resets the clock in the control segment. This will always load the next instruction.
+- `PCI` (Program Counter Increment): Increments the Program Counter.
 
 ## Memory
 
@@ -61,8 +79,10 @@ The stack starts at `0xFFBF` and grows downward.
 
 There are 64 addresses for memory mapped I/O to allow for expansion,
 but there are a few peripherals that are required:
+
 - `0xFFFF` Status Register: This register is written to and read by the CPU without addressing,\
-  but programs can access it through memory operations. The contents of the Status Register are explained more in [Status Register](#status-register).
+  but programs can access it through memory operations.\
+  The contents of the Status Register are explained more in [Status Register](#status-register).
 
 ## Status Register
 
