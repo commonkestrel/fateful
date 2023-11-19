@@ -46,8 +46,6 @@ enum Error {
 
 #[async_std::main]
 async fn main() -> Result<(), Error> {
-    env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
-
     let cli = Args::parse();
 
     env_logger::Builder::new()
@@ -57,18 +55,16 @@ async fn main() -> Result<(), Error> {
     match cli.command {
         Command::Emulate(args) => emulator::emulate(args).await?,
         Command::Deploy(args) => deploy::deploy(args).await?,
-        Command::Assemble(args) => {
-            match assembler::assemble(args, cli.verbose).await {
-                Ok(_) => {},
-                Err(errors) => {
-                    for err in errors {
-                        err.emit();
-                    }
-
-                    return Err(Error::Assembler);
+        Command::Assemble(args) => match assembler::assemble(args, cli.verbose).await {
+            Ok(_) => {}
+            Err(errors) => {
+                for err in errors {
+                    err.emit();
                 }
+
+                return Err(Error::Assembler);
             }
-        }
+        },
     }
 
     Ok(())
