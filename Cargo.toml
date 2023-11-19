@@ -17,6 +17,7 @@ clap-verbosity-flag = "2.1"
 clio = { version = "0.3", features = ["clap-parse"] }
 colored = "2"
 env_logger = "0.10"
+libloading = "0.8.1"
 log = "0.4"
 logos = "0.13"
 modular-bitfield = "0.11"

@@ -1,4 +1,6 @@
 use std::{
+    collections::HashMap,
+    ffi::{c_char, CStr, CString},
     fmt,
     io::{Read, Write},
     str::FromStr,
@@ -14,6 +16,7 @@ use async_std::{
 use bitflags::bitflags;
 use clap::Args;
 use clio::Input;
+use libloading::{Library, Symbol};
 use modular_bitfield::{bitfield, BitfieldSpecifier};
 use thiserror::Error;
 
@@ -212,6 +215,7 @@ impl fmt::Display for RegBank {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, BitfieldSpecifier)]
+#[bits = 4]
 enum Instruction {
     Add,
     Sub,
@@ -227,8 +231,6 @@ enum Instruction {
     Push,
     Pop,
     Jnz,
-    In,
-    Out,
 }
 
 impl From<u8> for Instruction {
@@ -248,8 +250,6 @@ impl From<u8> for Instruction {
             0xB => Instruction::Push,
             0xC => Instruction::Pop,
             0xD => Instruction::Jnz,
-            0xE => Instruction::In,
-            0xF => Instruction::Out,
             _ => unreachable!(),
         }
     }
@@ -309,7 +309,7 @@ impl Default for Control {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct State {
     pc: u16,
     sp: u16,
@@ -317,14 +317,39 @@ struct State {
     adc: Adc,
     bus: u8,
     bank: RegBank,
-    speed: Option<Duration>,
+    speed: Option<(Duration, u32)>,
     quit: bool,
     mem: Box<[u8]>,
     program: Box<[u8]>,
+    peripherals: HashMap<u8, Peripheral>,
 }
 
 impl State {
+    fn init(program: Box<[u8]>) -> Self {
+        State {
+            pc: 0,
+            sp: 0xFFFF,
+            ctrl: Control::default(),
+            adc: Adc::default(),
+            bus: 0,
+            bank: RegBank::default(),
+            speed: None,
+            quit: false,
+            mem: vec![0; 1 << 16].into_boxed_slice(),
+            program,
+            peripherals: HashMap::new(),
+        }
+    }
+
     async fn tick(&mut self) -> Result<bool, EmulatorError> {
+        for periph in self.peripherals.values() {
+            unsafe {
+                if let Ok(step) = periph.lib.get::<unsafe extern "C" fn(hz: u32)>(b"step") {
+                    step(self.speed.map(|clock| clock.1).unwrap_or(0));
+                }
+            }
+        }
+
         // rising edge
 
         if self.cw().contains(ControlWord::LI) {
@@ -354,23 +379,6 @@ impl State {
     }
 }
 
-impl State {
-    fn init(program: Box<[u8]>) -> Self {
-        State {
-            pc: 0,
-            sp: 0xFFFF,
-            ctrl: Control::default(),
-            adc: Adc::default(),
-            bus: 0,
-            bank: RegBank::default(),
-            speed: None,
-            quit: false,
-            mem: vec![0; 1 << 16].into_boxed_slice(),
-            program,
-        }
-    }
-}
-
 impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
@@ -379,8 +387,15 @@ impl fmt::Display for State {
                 PROGRAM COUNTER: {:#04X}\n\
                 BUS: {}\n\
                 {}\
+                PERIPHERALS: {:#?}\n\
             ",
-            self.pc, self.bus, self.bank,
+            self.pc,
+            self.bus,
+            self.bank,
+            self.peripherals
+                .values()
+                .map(|periph| periph.name.to_owned())
+                .collect::<Vec<String>>()
         )
     }
 }
@@ -390,15 +405,23 @@ enum SingleCmd {
     Get,
     Peek,
     Run,
+    Drop,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Hash)]
 enum DoubleCmd {
     Set,
     Poke,
+    Load,
 }
 
 static STATE: OnceLock<RwLock<State>> = OnceLock::new();
+
+#[derive(Debug)]
+struct Peripheral {
+    name: String,
+    lib: Library,
+}
 
 pub async fn emulate(mut args: EmulatorArgs) -> Result<(), EmulatorError> {
     let mut program: Box<[u8]> = vec![0; 1 << 16].into_boxed_slice();
@@ -443,7 +466,7 @@ pub async fn emulate(mut args: EmulatorArgs) -> Result<(), EmulatorError> {
             .await
             .speed
         {
-            if prev.elapsed()? >= speed {
+            if prev.elapsed()? >= speed.0 {
                 prev = SystemTime::now();
                 let halted = STATE
                     .get()
@@ -490,6 +513,8 @@ async fn handle_input(input: String) -> Result<(), EmulatorError> {
             "SET" => double_arg(DoubleCmd::Set, args).await?,
             "PEEK" => single_arg(SingleCmd::Peek, args).await?,
             "POKE" => double_arg(DoubleCmd::Poke, args).await?,
+            "LOAD" => double_arg(DoubleCmd::Load, args).await?,
+            "DROP" => single_arg(SingleCmd::Drop, args).await?,
             "RUN" => single_arg(SingleCmd::Run, args).await?,
             _ => eprintln!("UNRECOGNIZED COMMAND: {cmd}"),
         },
@@ -560,8 +585,11 @@ fn help() {
         GET <reg>           : Gets the value in the register `reg`\n\
         PEEK <addr>         : Gets the value at the memory address `addr`\n\
         POKE <addr>, <val>  : Sets the value at the memory address `addr` to `val`\n\
-        RUN <speed>         : Starts running the CPU at the specified `speed` (in hertz)\n
-                      If `speed` is zero, the emulator will run as fast as possible.
+        RUN <speed>         : Starts running the CPU at the specified `speed` (in hertz)\
+\n                      If `speed` is zero, the emulator will run as fast as possible.\n\
+        LOAD <path>, <port> : Loads the library at the given path as a peripheral.\
+\n                      Read more about peripherals and their requirements in the README.
+        DROP <port>         : Disconnects the peripheral on the given port, unloading the module.\n\
         DUMP                : Dumps the current machine state\n\
         STEP                : Pulses the clock a single time (only available if the CPU is stopped)\n\
         STOP                : Stops the CPU clock\n\
@@ -605,7 +633,7 @@ async fn single_arg(cmd: SingleCmd, arg: &str) -> Result<(), EmulatorError> {
                     .bank
                     .get_reg(reg)
             )
-        },
+        }
         SingleCmd::Peek => {
             let addr = match parse_u16(arg.trim()) {
                 Ok(addr) => addr,
@@ -615,16 +643,42 @@ async fn single_arg(cmd: SingleCmd, arg: &str) -> Result<(), EmulatorError> {
                 }
             };
 
-            println!(
-                "{addr:#06X}: {:#04X}",
-                STATE
-                    .get()
-                    .ok_or(EmulatorError::OnceEmpty)?
-                    .read()
-                    .await
-                    .mem[addr as usize]
-            );
-        },
+            let data: u8 = match addr {
+                0x0000..=0xFFBF => {
+                    STATE
+                        .get()
+                        .ok_or(EmulatorError::OnceEmpty)?
+                        .read()
+                        .await
+                        .mem[addr as usize]
+                }
+                0xFFC0..=0xFFFF => {
+                    match STATE
+                        .get()
+                        .ok_or(EmulatorError::OnceEmpty)?
+                        .read()
+                        .await
+                        .peripherals
+                        .get(&((addr - 0xFFC0) as u8))
+                    {
+                        Some(periph) => unsafe {
+                            let r: Result<Symbol<unsafe extern "C" fn() -> u8>, libloading::Error> =
+                                periph.lib.get(b"read");
+                            match r {
+                                Ok(read) => read(),
+                                Err(_) => {
+                                    eprintln!("PERIPHERAL ERROR: peripheral `{}` does not contain `read()` method.", periph.name);
+                                    return Ok(());
+                                }
+                            }
+                        },
+                        None => 0x00,
+                    }
+                }
+            };
+
+            println!("{addr:#06X}: {data:#04X}");
+        }
         SingleCmd::Run => {
             let speed = match parse_u32(arg.trim()) {
                 Ok(speed) => speed,
@@ -645,8 +699,29 @@ async fn single_arg(cmd: SingleCmd, arg: &str) -> Result<(), EmulatorError> {
                 .ok_or(EmulatorError::OnceEmpty)?
                 .write()
                 .await
-                .speed = Some(duration);
-        },
+                .speed = Some((duration, speed));
+        }
+        SingleCmd::Drop => {
+            let port = match parse_u8(arg.trim()) {
+                Ok(port) => port,
+                Err(_) => {
+                    eprintln!("INVALID ARGUMENT: unable to parse port");
+                    return Ok(());
+                }
+            };
+
+            let prev = STATE
+                .get()
+                .ok_or(EmulatorError::OnceEmpty)?
+                .write()
+                .await
+                .peripherals
+                .remove(&port);
+
+            if prev.is_none() {
+                println!("WARNING: no peripheral found on port {port:#04X}")
+            }
+        }
     }
 
     Ok(())
@@ -700,7 +775,7 @@ async fn double_arg(cmd: DoubleCmd, args: &str) -> Result<(), EmulatorError> {
                 .await
                 .bank
                 .set_reg(reg, value);
-        },
+        }
         DoubleCmd::Poke => {
             let addr = match parse_u16(arg1.trim()) {
                 Ok(addr) => addr,
@@ -718,13 +793,87 @@ async fn double_arg(cmd: DoubleCmd, args: &str) -> Result<(), EmulatorError> {
                 }
             };
 
+            match addr {
+                0x0000..=0xFFBF => {
+                    STATE
+                        .get()
+                        .ok_or(EmulatorError::OnceEmpty)?
+                        .write()
+                        .await
+                        .mem[addr as usize] = value
+                }
+                0xFFC0..=0xFFFF => {
+                    match STATE
+                        .get()
+                        .ok_or(EmulatorError::OnceEmpty)?
+                        .read()
+                        .await
+                        .peripherals
+                        .get(&((addr - 0xFFC0) as u8))
+                    {
+                        Some(periph) => unsafe {
+                            let r: Result<Symbol<unsafe extern "C" fn(u8)>, libloading::Error> =
+                                periph.lib.get(b"write");
+                            match r {
+                                Ok(write) => write(value),
+                                Err(_) => {
+                                    eprintln!("PERIPHERAL ERROR: peripheral `{}` does not contain `write()` method.", periph.name);
+                                    return Ok(());
+                                }
+                            }
+                        },
+                        None => {}
+                    }
+                }
+            };
+        }
+        DoubleCmd::Load => {
+            let port = match parse_u8(arg2.trim()) {
+                Ok(port) => port,
+                Err(_) => {
+                    eprintln!("INVALID ARGUMENT: unable to parse port");
+                    return Ok(());
+                }
+            };
+
+            if port >= 64 {
+                eprintln!("INVALID ARGUMENT: port out of range (port must be withing 0-63)");
+                return Ok(());
+            }
+            let path = parse_path(arg1);
+
+            let (lib, name) = unsafe {
+                let lib = match Library::new(path) {
+                    Ok(lib) => lib,
+                    Err(err) => {
+                        eprintln!("Unable to load peripheral library: {err}");
+                        return Ok(());
+                    }
+                };
+
+                let name = match lib.get::<unsafe extern "C" fn() -> *const i8>(b"name") {
+                    Ok(name) => CStr::from_ptr(name()).to_str().ok().map(|s| s.to_owned()),
+                    Err(_) => None,
+                }
+                .unwrap_or(arg1.to_owned());
+
+                if let Ok(init) = lib.get::<unsafe extern "C" fn()>(b"init") {
+                    init();
+                }
+
+                (lib, name)
+            };
+
+            let periph = Peripheral { name, lib };
+
             STATE
                 .get()
                 .ok_or(EmulatorError::OnceEmpty)?
                 .write()
                 .await
-                .mem[addr as usize] = value;
-        },
+                .peripherals
+                .insert(port, periph);
+        }
     }
 
     Ok(())
@@ -764,6 +913,10 @@ fn parse_u32(int: &str) -> Result<u32, <u32 as FromStr>::Err> {
     } else {
         u32::from_str_radix(int, 10)
     }
+}
+
+fn parse_path(source: &str) -> String {
+    source.trim_matches('"').trim_matches('\'').to_owned()
 }
 
 fn spawn_stdin_channel() -> Receiver<String> {
