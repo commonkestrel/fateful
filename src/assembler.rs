@@ -5,14 +5,14 @@
 mod ascii;
 mod diagnostic;
 mod lex;
-pub use diagnostic::{ Diagnostic, ResultScream, OptionalScream };
+pub use diagnostic::{Diagnostic, OptionalScream, ResultScream};
 
 use std::sync::OnceLock;
 
 use clap::Args;
 use clap_verbosity_flag::{Level, WarnLevel};
-use thiserror::Error;
 use clio::{Input, Output};
+use thiserror::Error;
 
 #[derive(Debug, Args)]
 pub struct AssemblerArgs {
@@ -21,7 +21,7 @@ pub struct AssemblerArgs {
     /// Assigned to the `CPU_FREQUENCY` variable.
     #[clap(short, long, default_value_t = 500_000)]
     frequency: u64,
-    
+
     #[clap(value_parser, default_value = "-")]
     input: Input,
     #[clap(value_parser, default_value = "-")]

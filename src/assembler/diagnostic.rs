@@ -1,4 +1,4 @@
-use super::{VERBOSITY, Verbosity};
+use super::{Verbosity, VERBOSITY};
 
 use super::lex::Span;
 

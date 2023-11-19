@@ -2,11 +2,11 @@
 
 use bitflags::bitflags;
 use logos::{Lexer, Logos};
+use std::collections::HashMap;
 use std::ops::Range;
 use std::path::Path;
 use std::str::FromStr;
 use std::{env, fs};
-use std::collections::HashMap;
 use thiserror::Error;
 
 #[derive(Logos, Debug, PartialEq)]
@@ -232,8 +232,6 @@ impl Stream {
         let mut current_section = Section::Start;
         let mut current_cw = None;
 
-
-
         for (token, span) in lex.spanned() {
             println!("{token:?}");
             match token {
@@ -284,16 +282,18 @@ impl Stream {
                             current_section = Section::Start;
                         } else {
                             match current_cw {
-                                Some(ref mut cw) => if pipe {
-                                    *cw |= ControlWord::from_str(&i)?;
-                                    pipe = false;
-                                } else {
-                                    return Err(Error::UnexpectedFlag(i));
-                                },
+                                Some(ref mut cw) => {
+                                    if pipe {
+                                        *cw |= ControlWord::from_str(&i)?;
+                                        pipe = false;
+                                    } else {
+                                        return Err(Error::UnexpectedFlag(i));
+                                    }
+                                }
                                 None => current_cw = Some(ControlWord::from_str(&i)?),
                             }
                         }
-                    },
+                    }
                     Token::Newline => {
                         if current_instr.is_some() {
                             if newline && !pipe {
@@ -310,12 +310,14 @@ impl Stream {
                                 newline = true;
                             }
                         }
-                    },
-                    Token::Pipe => if current_cw.is_some() {
-                        pipe = true
-                    } else {
-                        return Err(Error::Pipe);
-                    },
+                    }
+                    Token::Pipe => {
+                        if current_cw.is_some() {
+                            pipe = true
+                        } else {
+                            return Err(Error::Pipe);
+                        }
+                    }
                 },
                 Err(_) => return Err(Error::Lex(span)),
             }
@@ -336,7 +338,7 @@ impl Stream {
 
         println!("{:?}", instructions);
 
-        Ok(Stream {instructions})
+        Ok(Stream { instructions })
     }
 
     fn stitch(self) -> [ControlWord; 1 << 8] {
