@@ -1,4 +1,6 @@
 target
+zig-cache
+zig-out
 /.vscode
 *.dll
 *.so
