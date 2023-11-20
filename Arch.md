@@ -20,7 +20,7 @@ It is layed out like so:
 
 |           | Bit 7 | Bit 6 | Bit 5 | Bit 4 | Bit 3 | Bit 2 | Bit 1 | Bit 0 |
 |-----------|-------|-------|-------|-------|-------|-------|-------|-------|
-| Low Byte  | `RPA` | `RBA` | `RBO` | `RBI` |  `AO` | `AOH` | `AOM` | `AOL` |
+| Low Byte  | `RSP` | `RSB` | `RBO` | `RBI` |  `AO` | `AOH` | `AOM` | `AOL` |
 | Mid Byte  |  `SR` |  `PO` |  `LI` | `JNZ` | `PCI` |  `CR` | `SPD` | `SPI` |
 | High Byte |  ` `  |  ` `  | `LSP` | `AHI` | `ALI` |  `SA` |  `LA` | `THL` |
 
@@ -29,7 +29,7 @@ It is layed out like so:
 The first four bits of the control word (`AOL`, `AOM`, and `AOH`) represent the ALU opcode.
 ALU operations based on these opcodes are shown below:
 
-|  `AO` | `AO2` | `AO1` | `AO0` | Operation |
+|  `AO` | `AOH` | `AOM` | `AOL` | Operation |
 |-------|-------|-------|-------|-----------|
 |  `0`  |  `0`  |  `0`  |  `0`  |   `NOP`   |
 |  `0`  |  `0`  |  `0`  |  `1`  |   `CMP`   |

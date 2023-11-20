@@ -133,48 +133,44 @@ bitflags! {
         const AOM = 1 << 1;
         /// ALU opcode high
         const AOH = 1 << 2;
-        /// ALU active
-        const AA = 1 << 3;
-        /// ALU load primary
-        const ALP = 1 << 4;
-        /// ALU load secondary
-        const ALS = 1 << 5;
-        /// Register bank bus in
-        const RI = 1 << 6;
-        /// Register bank bus out
-        const RO = 1 << 7;
-        /// Instruction builtin register address
-        const RBA = 1 << 8;
-        /// Instruction primary register address
-        const RPA = 1 << 9;
-        /// Stack pointer increment
-        const SPI = 1 << 10;
-        /// Stack pointer decrement
-        const SPD = 1 << 11;
-        /// Clock reset
-        const CR = 1 << 12;
-        /// Program counter increment
-        const PCI = 1 << 13;
-        /// Set program counter
-        const JNZ = 1 << 14;
-        /// Load instruction
-        const LI = 1 << 15;
-        /// Program out
-        const PO = 1 << 16;
-        /// Swap Temp Register
-        const ST = 1 << 17;
-        /// Transfer HIGH/LOW
-        const THL = 1 << 18;
+        /// Arithmetic Operation
+        const AO = 1 << 3;
+        /// Register Bank In
+        const RBI = 1 << 4;
+        /// Register Bank Out
+        const RBO = 1 << 5;
+        /// Register Select Built-in
+        const RSB = 1 << 6;
+        /// Register Select Primary
+        const RSP = 1 << 7;
+        /// Stack Pointer Increment
+        const SPI = 1 << 8;
+        /// Stack Pointer Decrement
+        const SPD = 1 << 9;
+        /// Clock Reset
+        const CR = 1 << 10;
+        /// Program Counter Increment
+        const PCI = 1 << 11;
+        /// Jump if Not Zero
+        const JNZ = 1 << 12;
+        /// Load Instruction
+        const LI = 1 << 13;
+        /// Program Out
+        const PO = 1 << 14;
+        /// Store Register
+        const SR = 1 << 15;
+        /// Transfer HL
+        const THL = 1 << 16;
         /// Load Address
-        const LA = 1 << 19;
+        const LA = 1 << 17;
         /// Store Address
-        const SA = 1 << 20;
-        /// ADDRESS low in
-        const AL = 1 << 21;
-        /// ADDRESS high in
-        const AH = 1 << 22;
+        const SA = 1 << 18;
+        /// Address Low In
+        const ALI = 1 << 19;
+        /// Address High In
+        const AHI = 1 << 20;
         /// Load Stack Pointer
-        const LSP = 1 << 23;
+        const LSP = 1 << 21;
     }
 }
 
@@ -186,13 +182,11 @@ impl FromStr for ControlWord {
             "aol" => Ok(ControlWord::AOL),
             "aom" => Ok(ControlWord::AOM),
             "aoh" => Ok(ControlWord::AOH),
-            "aa" => Ok(ControlWord::AA),
-            "alp" => Ok(ControlWord::ALP),
-            "als" => Ok(ControlWord::ALS),
-            "ri" => Ok(ControlWord::RI),
-            "ro" => Ok(ControlWord::RO),
-            "rba" => Ok(ControlWord::RBA),
-            "rpa" => Ok(ControlWord::RPA),
+            "ao" => Ok(ControlWord::AO),
+            "rbi" => Ok(ControlWord::RBI),
+            "rbo" => Ok(ControlWord::RBO),
+            "rsb" => Ok(ControlWord::RSB),
+            "rsp" => Ok(ControlWord::RSP),
             "spi" => Ok(ControlWord::SPI),
             "spd" => Ok(ControlWord::SPD),
             "cr" => Ok(ControlWord::CR),
@@ -200,12 +194,12 @@ impl FromStr for ControlWord {
             "jnz" => Ok(ControlWord::JNZ),
             "li" => Ok(ControlWord::LI),
             "po" => Ok(ControlWord::PO),
-            "st" => Ok(ControlWord::ST),
+            "sr" => Ok(ControlWord::SR),
             "thl" => Ok(ControlWord::THL),
             "la" => Ok(ControlWord::LA),
             "sa" => Ok(ControlWord::SA),
-            "al" => Ok(ControlWord::AL),
-            "ah" => Ok(ControlWord::AH),
+            "ali" => Ok(ControlWord::ALI),
+            "ahi" => Ok(ControlWord::AHI),
             "lsp" => Ok(ControlWord::LSP),
             _ => Err(Error::UnknownFlag(s.to_owned())),
         }
