@@ -115,12 +115,12 @@ push:
     lsp | pci
     po | sa
 .both:
-    spi | cr | pci
+    spd | cr | pci
 
 pop:
 .reg:
     li
-    spd
+    spi
     lsp
     rba | ro | sa | cr | pci
 
@@ -135,9 +135,3 @@ jnz:
     po | alp
     aol | aom | aoh
     jnz | cr
-
-in:
-    ; TODO: figure out `in` and `out`
-
-out:
-    ; TODO: figure out `in` and `out`

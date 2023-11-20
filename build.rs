@@ -95,8 +95,6 @@ enum Instruction {
     Push = 0xB,
     Pop = 0xC,
     Jnz = 0xD,
-    In = 0xE,
-    Out = 0xF,
 }
 
 #[derive(Debug, Clone)]
@@ -274,8 +272,6 @@ impl Stream {
                                 "push:" => Instruction::Push,
                                 "pop:" => Instruction::Pop,
                                 "jnz:" => Instruction::Jnz,
-                                "in:" => Instruction::In,
-                                "out:" => Instruction::Out,
                                 _ => return Err(Error::Instruction(i)),
                             });
                             newline = false;
