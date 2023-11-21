@@ -1,7 +1,7 @@
 use std::{
     cmp::Ordering,
     collections::HashMap,
-    ffi::{c_char, c_int, CStr, CString},
+    ffi::{c_char, c_int, CStr},
     fmt,
     io::{Read, Write},
     str::FromStr,
@@ -12,12 +12,12 @@ use std::{
 use async_std::{
     channel::{self, Receiver, Sender, TryRecvError},
     io,
-    sync::{Mutex, RwLock},
+    sync::RwLock,
 };
 use bitflags::bitflags;
 use clap::Args;
 use clio::Input;
-use libloading::{Library, Symbol};
+use libloading::Library;
 use modular_bitfield::prelude::*;
 use thiserror::Error;
 
@@ -407,7 +407,47 @@ impl State {
                 self.sreg.contains(SReg::C),
             )
         } else if cw.contains(ControlWord::LA) {
-            self.mem[self.addr as usize]
+            match self.addr {
+                0x0000..=0xFFBF => {
+                    self.mem[self.addr as usize]
+                }
+                0xFFC0..=0xFFFE => {
+                    match self
+                        .peripherals
+                        .get(&((self.addr - 0xFFC0) as u8))
+                    {
+                        Some(periph) => unsafe {
+                            if let Ok(stateful_read) = periph
+                                .lib
+                                .library
+                                .get::<unsafe extern "C" fn(*mut (), u8) -> u8>(b"stateful_read")
+                            {
+                                match periph.lib.state {
+                                    Some(state) => stateful_read(state, periph.n),
+                                    None => {
+                                        eprintln!("PERIPHERAL ERROR: unable to call `stateful_read` (state was not initialized)");
+                                        return true;
+                                    }
+                                }
+                            } else if let Ok(read) =
+                                periph
+                                    .lib
+                                    .library
+                                    .get::<unsafe extern "C" fn(u8) -> u8>(b"read")
+                            {
+                                read(periph.n)
+                            } else {
+                                eprintln!("PERIPHERAL ERROR: `read` and `stateful_write` not present in peripheral (peripherals must implement one of these)");
+                                return true;
+                            }
+                        },
+                        None => 0x00,
+                    }
+                },
+                0xFFFF => {
+                    self.sreg.bits()
+                }
+            }
         } else if cw.contains(ControlWord::PO) {
             program_byte
         } else {
@@ -422,7 +462,47 @@ impl State {
             self.bank.set_reg(reg_index, bus);
         }
         if cw.contains(ControlWord::SA) {
-            self.mem[self.addr as usize] = bus;
+            match self.addr {
+                0x0000..=0xFFBF => {
+                    self.mem[self.addr as usize] = bus;
+                }
+                0xFFC0..=0xFFFE => {
+                    match self
+                        .peripherals
+                        .get(&((self.addr - 0xFFC0) as u8))
+                    {
+                        Some(periph) => unsafe {
+                            if let Ok(stateful_write) = periph
+                                .lib
+                                .library
+                                .get::<unsafe extern "C" fn(*mut (), u8, u8)>(b"stateful_read")
+                            {
+                                match periph.lib.state {
+                                    Some(state) => stateful_write(state, periph.n, bus),
+                                    None => {
+                                        eprintln!("PERIPHERAL ERROR: unable to call `stateful_write` (state was not initialized)");
+                                        return true;
+                                    }
+                                }
+                            } else if let Ok(write) =
+                                periph
+                                    .lib
+                                    .library
+                                    .get::<unsafe extern "C" fn(u8, u8) -> u8>(b"write")
+                            {
+                                write(periph.n, bus);
+                            } else {
+                                eprintln!("PERIPHERAL ERROR: `read` and `stateful_write` not present in peripheral (peripherals must implement one of these)");
+                                return true;
+                            }
+                        },
+                        None => {},
+                    }
+                },
+                0xFFFF => {
+                    self.sreg = SReg::from_bits_retain(bus);
+                }
+            }
         }
 
         if cw.contains(ControlWord::ALI) {
@@ -508,7 +588,7 @@ impl State {
                 }
             };
 
-            let name = match lib.get::<unsafe extern "C" fn() -> *const i8>(b"name") {
+            let name = match lib.get::<unsafe extern "C" fn() -> *const c_char>(b"name") {
                 Ok(name) => CStr::from_ptr(name()).to_str().ok().map(|s| s.to_owned()),
                 Err(_) => None,
             }
@@ -715,6 +795,9 @@ async fn handle_input(input: String) -> Result<(), EmulatorError> {
                             if p < 0xFFC0 {
                                 eprintln!("INVALID ARGUMENT: memory mapped I/O can only be mapped to addresses between 0xFFC0-0xFFFF");
                                 None
+                            } else if p == 0xFFFF {
+                                eprintln!("INVALID ARGUMENT: the status register cannot be dropped");
+                                None
                             } else {
                                 Some((p - 0xFFC0) as u8)
                             }
@@ -749,6 +832,9 @@ async fn handle_input(input: String) -> Result<(), EmulatorError> {
                                 Ok(p) => {
                                     if p < 0xFFC0 {
                                         eprintln!("INVALID ARGUMENT: memory mapped I/O can only be mapped to addresses between 0xFFC0-0xFFFF");
+                                        None
+                                    } else if p == 0xFFFF {
+                                        eprintln!("INVALID ARGUMENT: the status register cannot be overwritten");
                                         None
                                     } else {
                                         Some((p - 0xFFC0) as u8)
@@ -908,7 +994,7 @@ async fn single_arg(cmd: SingleCmd, arg: &str) -> Result<(), EmulatorError> {
                         .await
                         .mem[addr as usize]
                 }
-                0xFFC0..=0xFFFF => {
+                0xFFC0..=0xFFFE => {
                     match STATE
                         .get()
                         .ok_or(EmulatorError::OnceEmpty)?
@@ -944,6 +1030,14 @@ async fn single_arg(cmd: SingleCmd, arg: &str) -> Result<(), EmulatorError> {
                         },
                         None => 0x00,
                     }
+                },
+                0xFFFF => {
+                    STATE
+                        .get()
+                        .ok_or(EmulatorError::OnceEmpty)?
+                        .read()
+                        .await
+                        .sreg.bits()
                 }
             };
 
@@ -1051,7 +1145,7 @@ async fn double_arg(cmd: DoubleCmd, args: &str) -> Result<(), EmulatorError> {
                         .await
                         .mem[addr as usize] = value
                 }
-                0xFFC0..=0xFFFF => {
+                0xFFC0..=0xFFFE => {
                     match STATE
                         .get()
                         .ok_or(EmulatorError::OnceEmpty)?
@@ -1086,6 +1180,14 @@ async fn double_arg(cmd: DoubleCmd, args: &str) -> Result<(), EmulatorError> {
                         },
                         None => {}
                     }
+                },
+                0xFFFF => {
+                    STATE
+                        .get()
+                        .ok_or(EmulatorError::OnceEmpty)?
+                        .write()
+                        .await
+                        .sreg = SReg::from_bits_retain(value)
                 }
             };
         }
