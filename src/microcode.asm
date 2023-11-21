@@ -1,116 +1,119 @@
 add:
     li
-    rba | ro | alp | pci
+    rsb | rbo | aom | aol | pci
 .reg:
-    rpa | als
+    rsp | aoh
 .imm:
-    po | als
+    po | aoh
 .both:
-    aa | rba | ri | cr | pci
+    ao | rsb | rbi | cr | pci
 
 sub:
     li
-    rba | ro | alp | pci
+    rsb | rbo | aom | aol | pci
 .reg:
-    rpa | als
+    rsp | aoh
 .imm:
-    po | als
+    po | aoh
 .both:
-    aa | aol | rba | ri | cr | pci
+    ao | aol | rsb | rbi | cr | pci
 
 adc:
     li
-    rba | ro | alp | pci
+    rsb | rbo | aom | aol | pci
 .reg:
-    rpa | als
+    rsp | aoh
 .imm:
-    po | als
+    po | aoh
 .both:
-    aa | aom | rba | ri | cr | pci
+    ao | aom | rsb | rbi | cr | pci
 
 sbc:
     li
-    rba | ro | alp | pci
+    rsb | rbo | aom | aol | pci
 .reg:
-    rpa | als
+    rsp | aoh
 .imm:
-    po | als
+    po | aoh
 .both:
-    aa | aol | aom | rba | ri | cr | pci
+    ao | aol | aom | rsb | rbi | cr | pci
 
 nand:
     li
-    rba | ro | alp | pci
+    rsb | rbo | aom | aol | pci
 .reg:
-    rpa | als
+    rsp | aoh
 .imm:
-    po | als
+    po | aoh
 .both:
-    aa | aoh | rba | ri | cr | pci
+    ao | aoh | rsb | rbi | cr | pci
 
 or:
     li
-    rba | ro | alp | pci
+    rsb | rbo | aom | aol | pci
 .reg:
-    rpa | als
+    rsp | aoh
 .imm:
-    po | als
+    po | aoh
 .both:
-    aa | aoh | aol | rba | ri | cr | pci
+    ao | aoh | aol | rsb | rbi | cr | pci
 
 cmp:
     li
-    rba | ro | alp | pci
+    rsb | rbo | aom | aol | pci
 .reg:
-    rpa | als
+    rsp | aoh
 .imm:
-    po | als
+    po | aoh
 .both:
-    aa | aoh | aom | cr | pci
+    ao | aoh | aom | cr | pci
 
 mv:
 .reg:
     li
-    rba | ro | st | pci
-    rpa | ri | st | cr | pci
+    sr | cr | pci
 .imm:
-    li | pci
-    rba | ri | po | cr | pci
+    li
+    pci
+    rsb | rbi | po | cr | pci
 
 ld:
 .reg:
     li
-    thl | ro
-    la | rba | ri | cr | pci
+    thl | rbo
+    la | rsb | rbi | cr | pci
 .imm:
-    li | pci
-    ah | po | pci
-    al | po
-    la | rba | ri | cr | pci
+    li
+    pci
+    ahi | po | pci
+    ali | po
+    la | rsb | rbi | cr | pci
 
 st:
 .reg:
     li
-    thl | ro
-    sa | rba | ro | cr | pci
+    thl | rbo
+    sa | rsb | rbo | cr | pci
 .imm:
-    li | pci
-    ah | po | pci
-    al | po
-    sa | rba | ro | cr | pci
+    li
+    pci
+    ahi | po | pci
+    ali | po
+    sa | rsb | rbo | cr | pci
 
 lda:
 .imm:
-    li | pci
-    po | ah | pci
-    po | al
-    thl | ri | cr | pci
+    li
+    pci
+    po | ahi | pci
+    po | ali
+    thl | rbi | cr | pci
 
 push:
     li
 .reg:
     lsp
-    rba | ro | sa
+    rsb | rbo | sa
 .imm:
     lsp | pci
     po | sa
@@ -122,16 +125,21 @@ pop:
     li
     spi
     lsp
-    rba | ro | sa | cr | pci
+    rsb | rbo | sa | cr | pci
 
 jnz:
 .reg:
     li
-    rba | ro | alp
+    rsb | rbo | aom | aol
     aol | aom | aoh
     jnz | cr
 .imm:
-    li | pci
-    po | alp
+    li
+    pci
+    po | aom | aol
     aol | aom | aoh
     jnz | cr
+
+halt:
+    li
+    sh
