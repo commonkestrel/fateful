@@ -1,23 +1,24 @@
 use std::{
+    cmp::Ordering,
     collections::HashMap,
-    ffi::{c_char, CStr, CString},
+    ffi::{c_char, c_int, CStr, CString},
     fmt,
     io::{Read, Write},
     str::FromStr,
-    sync::OnceLock,
+    sync::{Arc, OnceLock},
     time::{Duration, SystemTime, SystemTimeError},
 };
 
 use async_std::{
     channel::{self, Receiver, Sender, TryRecvError},
     io,
-    sync::RwLock,
+    sync::{Mutex, RwLock},
 };
 use bitflags::bitflags;
 use clap::Args;
 use clio::Input;
 use libloading::{Library, Symbol};
-use modular_bitfield::{bitfield, BitfieldSpecifier};
+use modular_bitfield::prelude::*;
 use thiserror::Error;
 
 const CTRL_LOW: &[u8; 1 << 8] = include_bytes!(concat!(env!("OUT_DIR"), "/ctrl_low.rom"));
@@ -47,7 +48,6 @@ pub struct EmulatorArgs {
     input: Input,
 }
 
-// TODO: Figure out how to work `IN` and `OUT` into 24 bits
 bitflags! {
     /// Representation of the CPU Control Word
     ///
@@ -60,60 +60,110 @@ bitflags! {
         const AOM = 1 << 1;
         /// ALU opcode high
         const AOH = 1 << 2;
-        /// ALU active
-        const AA = 1 << 3;
-        /// ALU load primary
-        const ALP = 1 << 4;
-        /// ALU load secondary
-        const ALS = 1 << 5;
-        /// Register bank bus in
-        const RI = 1 << 6;
-        /// Register bank bus out
-        const RO = 1 << 7;
-        /// Instruction builtin register address
-        const RBA = 1 << 8;
-        /// Instruction primary register address
-        const RPA = 1 << 9;
-        /// Stack pointer increment
-        const SPI = 1 << 10;
-        /// Stack pointer decrement
-        const SPD = 1 << 11;
-        /// Clock reset
-        const CR = 1 << 12;
-        /// Program counter increment
-        const PCI = 1 << 13;
-        /// Set program counter
-        const JNZ = 1 << 14;
-        /// Load instruction
-        const LI = 1 << 15;
-        /// Program out
-        const PO = 1 << 16;
-        /// Swap Temp Register
-        const ST = 1 << 17;
-        /// Transfer HIGH/LOW
-        const THL = 1 << 18;
+        /// Arithmetic Operation
+        const AO = 1 << 3;
+        /// Register Bank In
+        const RBI = 1 << 4;
+        /// Register Bank Out
+        const RBO = 1 << 5;
+        /// Register Select Built-in
+        const RSB = 1 << 6;
+        /// Register Select Primary
+        const RSP = 1 << 7;
+        /// Stack Pointer Increment
+        const SPI = 1 << 8;
+        /// Stack Pointer Decrement
+        const SPD = 1 << 9;
+        /// Clock Reset
+        const CR = 1 << 10;
+        /// Program Counter Increment
+        const PCI = 1 << 11;
+        /// Jump if Not Zero
+        const JNZ = 1 << 12;
+        /// Load Instruction
+        const LI = 1 << 13;
+        /// Program Out
+        const PO = 1 << 14;
+        /// Store Register
+        const SR = 1 << 15;
+        /// Transfer HL
+        const THL = 1 << 16;
         /// Load Address
-        const LA = 1 << 19;
+        const LA = 1 << 17;
         /// Store Address
-        const SA = 1 << 20;
-        /// ADDRESS low in
-        const AL = 1 << 21;
-        /// ADDRESS high in
-        const AH = 1 << 22;
+        const SA = 1 << 18;
+        /// Address Low In
+        const ALI = 1 << 19;
+        /// Address High In
+        const AHI = 1 << 20;
         /// Load Stack Pointer
-        const LSP = 1 << 23;
+        const LSP = 1 << 21;
+        /// Set Halt
+        const SH = 1 << 22;
+    }
+}
+
+bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    struct SReg: u8 {
+        /// Zero
+        const Z = 1 << 0;
+        /// Carry
+        const C = 1 << 1;
+        /// Less-than
+        const L = 1 << 2;
+        /// Equal
+        const E = 1 << 3;
+        /// Greater-than
+        const G = 1 << 4;
+        /// Halt
+        const H = 1 << 7;
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct Adc {
+struct Alu {
     primary: u8,
     secondary: u8,
 }
 
-impl Default for Adc {
+impl Alu {
+    fn compute(&self, aol: bool, aom: bool, aoh: bool, carry: bool) -> u8 {
+        match (aoh, aom, aol) {
+            (false, false, false) => self.primary.wrapping_add(self.secondary),
+            (false, false, true) => self.primary.wrapping_sub(self.secondary),
+            (false, true, false) => self
+                .primary
+                .wrapping_add(self.secondary)
+                .wrapping_add(carry as u8),
+            (false, true, true) => self
+                .primary
+                .wrapping_sub(self.secondary)
+                .wrapping_sub(carry as u8),
+            (true, false, false) => !(self.primary & self.secondary),
+            (true, false, true) => self.primary | self.secondary,
+            _ => 0x00,
+        }
+    }
+
+    fn execute(&mut self, sreg: &mut SReg, bus: u8, aol: bool, aom: bool, aoh: bool) {
+        match (aoh, aom, aol) {
+            (false, false, true) => match self.primary.cmp(&self.secondary) {
+                Ordering::Less => sreg.insert(SReg::L),
+                Ordering::Equal => sreg.insert(SReg::E),
+                Ordering::Greater => sreg.insert(SReg::G),
+            },
+            (false, true, false) => sreg.set(SReg::Z, self.primary == 0),
+            (false, true, true) => self.primary = bus,
+            (true, false, false) => self.secondary = bus,
+            _ => {}
+        }
+    }
+}
+
+impl Default for Alu {
     fn default() -> Self {
-        Adc {
+        Alu {
             primary: 0,
             secondary: 0,
         }
@@ -217,20 +267,21 @@ impl fmt::Display for RegBank {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, BitfieldSpecifier)]
 #[bits = 4]
 enum Instruction {
-    Add,
-    Sub,
-    Adc,
-    Sbc,
-    Nand,
-    Or,
-    Cmp,
-    Mv,
-    Ld,
-    St,
-    Lda,
-    Push,
-    Pop,
-    Jnz,
+    Add = 0x0,
+    Sub = 0x1,
+    Adc = 0x2,
+    Sbc = 0x3,
+    Nand = 0x4,
+    Or = 0x5,
+    Cmp = 0x6,
+    Mv = 0x7,
+    Ld = 0x8,
+    St = 0x9,
+    Lda = 0xA,
+    Push = 0xB,
+    Pop = 0xC,
+    Jnz = 0xD,
+    Halt = 0xF,
 }
 
 impl From<u8> for Instruction {
@@ -255,42 +306,14 @@ impl From<u8> for Instruction {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, BitfieldSpecifier)]
-enum Register {
-    A,
-    B,
-    C,
-    D,
-    E,
-    H,
-    L,
-    F,
-}
-
-impl From<u8> for Register {
-    fn from(val: u8) -> Self {
-        match val {
-            0 => Register::A,
-            1 => Register::B,
-            2 => Register::C,
-            3 => Register::D,
-            4 => Register::E,
-            5 => Register::H,
-            6 => Register::L,
-            7 => Register::F,
-            _ => unreachable!(),
-        }
-    }
-}
-
 #[bitfield]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct InstructionHeader {
+    #[bits = 3]
+    register: B3,
+    immediate: bool,
     #[bits = 4]
     instruction: Instruction,
-    immediate: bool,
-    #[bits = 3]
-    register: Register,
 }
 
 #[derive(Debug, Clone)]
@@ -314,9 +337,11 @@ struct State {
     pc: u16,
     sp: u16,
     ctrl: Control,
-    adc: Adc,
+    sreg: SReg,
+    alu: Alu,
     bus: u8,
     bank: RegBank,
+    addr: u16,
     speed: Option<(Duration, u32)>,
     quit: bool,
     mem: Box<[u8]>,
@@ -330,9 +355,11 @@ impl State {
             pc: 0,
             sp: 0xFFFF,
             ctrl: Control::default(),
-            adc: Adc::default(),
+            sreg: SReg::empty(),
+            alu: Alu::default(),
             bus: 0,
             bank: RegBank::default(),
+            addr: 0,
             speed: None,
             quit: false,
             mem: vec![0; 1 << 16].into_boxed_slice(),
@@ -341,34 +368,127 @@ impl State {
         }
     }
 
-    async fn tick(&mut self) -> Result<bool, EmulatorError> {
-        for periph in self.peripherals.values() {
-            unsafe {
-                if let Ok(step) = periph.lib.get::<unsafe extern "C" fn(hz: u32)>(b"step") {
-                    step(self.speed.map(|clock| clock.1).unwrap_or(0));
-                }
-            }
+    fn tick(&mut self) -> bool {
+        if self.sreg.contains(SReg::H) {
+            return true;
+        }
+
+        let cw = self.cw();
+
+        if cw.contains(ControlWord::SH) {
+            self.sreg.insert(SReg::H);
+            return true;
         }
 
         // rising edge
 
-        if self.cw().contains(ControlWord::LI) {
-            let byte = self.program[self.pc as usize];
+        let program_byte = self.program[self.pc as usize];
+
+        if cw.contains(ControlWord::LI) {
+            let byte = program_byte;
             self.ctrl.head = InstructionHeader::from_bytes([byte]);
         }
 
+        let reg_index = if cw.contains(ControlWord::RSB) {
+            self.ctrl.head.register()
+        } else if cw.contains(ControlWord::RSP) {
+            program_byte & 0b0000_0111
+        } else {
+            0x00
+        };
+
+        let bus = if cw.contains(ControlWord::RBO) {
+            self.bank.get_reg(reg_index)
+        } else if cw.contains(ControlWord::AO) {
+            self.alu.compute(
+                cw.contains(ControlWord::AOL),
+                cw.contains(ControlWord::AOM),
+                cw.contains(ControlWord::AOH),
+                self.sreg.contains(SReg::C),
+            )
+        } else if cw.contains(ControlWord::LA) {
+            self.mem[self.addr as usize]
+        } else if cw.contains(ControlWord::PO) {
+            program_byte
+        } else {
+            0x00
+        };
+
+        if cw.contains(ControlWord::LSP) {
+            self.addr = self.sp;
+        }
+
+        if cw.contains(ControlWord::RBI) {
+            self.bank.set_reg(reg_index, bus);
+        }
+        if cw.contains(ControlWord::SA) {
+            self.mem[self.addr as usize] = bus;
+        }
+
+        if cw.contains(ControlWord::ALI) {
+            self.addr = self.addr & !0xFF | bus as u16;
+        }
+        if cw.contains(ControlWord::AHI) {
+            self.addr = self.addr & !0xFF00 | ((bus as u16) << 8);
+        }
+
+        if cw.contains(ControlWord::THL) {
+            self.addr = ((self.bank.h as u16) << 8) | (self.bank.l as u16);
+        }
+
+        if cw.contains(ControlWord::SPI) {
+            self.sp = self.sp.wrapping_add(1);
+        }
+
+        if cw.contains(ControlWord::SPD) {
+            self.sp = self.sp.wrapping_sub(1);
+        }
+
+        if cw.contains(ControlWord::JNZ) && self.sreg.contains(SReg::Z) {
+            self.pc = ((self.bank.h as u16) << 8) | (self.bank.l as u16);
+        }
+
+        if !cw.contains(ControlWord::AO) {
+            self.alu.execute(
+                &mut self.sreg,
+                bus,
+                cw.contains(ControlWord::AOL),
+                cw.contains(ControlWord::AOM),
+                cw.contains(ControlWord::AOH),
+            )
+        }
+
         // falling edge
-        if self.cw().contains(ControlWord::CR) {
+        if cw.contains(ControlWord::CR) {
             self.ctrl.clock = 0;
         } else {
             self.ctrl.clock = self.ctrl.clock.wrapping_add(1);
         }
-        Ok(true)
+
+        if cw.contains(ControlWord::PCI) {
+            self.pc = self.pc.wrapping_add(1);
+        }
+
+        false
+    }
+
+    fn halt(&mut self) {
+        self.speed = None;
+
+        print!(
+            "\n\
+            INFO: CPU halt detected\n\
+            INFO: stopping clock\n\
+            > "
+        );
+        std::io::stdout()
+            .flush()
+            .expect("should be able to write to `stdout`");
     }
 
     fn cw(&self) -> ControlWord {
-        let index = ((self.ctrl.head.instruction() as u8) << 5
-            | (self.ctrl.head.immediate() as u8) << 4
+        let index = ((self.ctrl.head.instruction() as u8) << 4
+            | (self.ctrl.head.immediate() as u8) << 3
             | self.ctrl.clock) as usize;
 
         let low = CTRL_LOW[index] as u32;
@@ -377,25 +497,101 @@ impl State {
 
         ControlWord::from_bits_retain(low | (mid << 8) | (high << 16))
     }
+
+    fn load(&mut self, path: String, ports: Vec<u8>) {
+        let (library, name, state) = unsafe {
+            let lib = match Library::new(&path) {
+                Ok(lib) => lib,
+                Err(err) => {
+                    eprintln!("Unable to load peripheral library: {err:?}");
+                    return;
+                }
+            };
+
+            let name = match lib.get::<unsafe extern "C" fn() -> *const i8>(b"name") {
+                Ok(name) => CStr::from_ptr(name()).to_str().ok().map(|s| s.to_owned()),
+                Err(_) => None,
+            }
+            .unwrap_or(path);
+
+            let state = if let Ok(stateful_init) =
+                lib.get::<unsafe extern "C" fn(u8) -> *mut ()>(b"stateful_init")
+            {
+                Some(stateful_init(ports.len() as u8))
+            } else if let Ok(init) = lib.get::<unsafe extern "C" fn(u8)>(b"init") {
+                init(ports.len() as u8);
+                None
+            } else {
+                None
+            };
+
+            match lib.get::<*const c_int>(b"ERROR") {
+                Ok(err) => match **err {
+                    0 => {}
+                    err => {
+                        eprintln!("PERIPHERAL ERROR: initialization failed with exit code {err}");
+                        return;
+                    }
+                },
+                Err(_) => {}
+            }
+
+            (lib, name, state)
+        };
+
+        let lib = Arc::new(Lib {
+            library,
+            name,
+            state,
+        });
+
+        for (n, port) in ports.into_iter().enumerate() {
+            let periph = Peripheral {
+                lib: lib.clone(),
+                n: n as u8,
+            };
+            if let Some(periph) = self.peripherals.insert(port, periph) {
+                println!(
+                    "WARNING: overwriting previous peripheral `{}`",
+                    periph.lib.name
+                );
+            }
+        }
+    }
 }
 
 impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let periph = if self.peripherals.is_empty() {
+            "[]".to_owned()
+        } else {
+            "[\n    ".to_owned()
+                + &self
+                    .peripherals
+                    .iter()
+                    .map(|(key, periph)| {
+                        format!("{:#06X}: \"{}\"", (*key as u16) + 0xFFC0, periph.lib.name)
+                    })
+                    .collect::<Vec<String>>()
+                    .join(",\n    ")
+                + ",\n]"
+        };
+
         write!(
             f,
             "\
                 PROGRAM COUNTER: {:#04X}\n\
                 BUS: {}\n\
                 {}\
-                PERIPHERALS: {:#?}\n\
+                CW: {:?}\n\
+                PERIPHERALS: {periph}\n\
+                INSTRUCTION: {:#010b}\n\
             ",
             self.pc,
             self.bus,
             self.bank,
-            self.peripherals
-                .values()
-                .map(|periph| periph.name.to_owned())
-                .collect::<Vec<String>>()
+            self.cw(),
+            self.ctrl.head.bytes[0]
         )
     }
 }
@@ -405,23 +601,52 @@ enum SingleCmd {
     Get,
     Peek,
     Run,
-    Drop,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Hash)]
 enum DoubleCmd {
     Set,
     Poke,
-    Load,
 }
 
-static STATE: OnceLock<RwLock<State>> = OnceLock::new();
+#[derive(Debug)]
+struct Lib {
+    name: String,
+    library: Library,
+    state: Option<*mut ()>,
+}
+
+impl Drop for Lib {
+    fn drop(&mut self) {
+        unsafe {
+            if let Ok(stateful_drop) = self
+                .library
+                .get::<unsafe extern "C" fn(*mut ())>(b"stateful_drop")
+            {
+                match self.state {
+                    Some(state) => stateful_drop(state),
+                    None => {
+                        eprintln!("PERIPHERAL ERROR: unable to call `stateful_drop` (state was not initialized)");
+                    }
+                }
+            } else if let Ok(stateless_drop) = self.library.get::<unsafe extern "C" fn()>(b"drop") {
+                stateless_drop();
+            }
+        }
+    }
+}
+
+// We can do this since the only time `state` is accessed is on drop.
+unsafe impl Send for Lib {}
+unsafe impl Sync for Lib {}
 
 #[derive(Debug)]
 struct Peripheral {
-    name: String,
-    lib: Library,
+    lib: Arc<Lib>,
+    n: u8,
 }
+
+static STATE: OnceLock<RwLock<State>> = OnceLock::new();
 
 pub async fn emulate(mut args: EmulatorArgs) -> Result<(), EmulatorError> {
     let mut program: Box<[u8]> = vec![0; 1 << 16].into_boxed_slice();
@@ -459,49 +684,19 @@ pub async fn emulate(mut args: EmulatorArgs) -> Result<(), EmulatorError> {
             break;
         }
 
-        if let Some(speed) = STATE
-            .get()
-            .ok_or(EmulatorError::OnceEmpty)?
-            .read()
-            .await
-            .speed
-        {
+        let mut state = STATE.get().ok_or(EmulatorError::OnceEmpty)?.write().await;
+
+        if let Some(speed) = state.speed {
             if prev.elapsed()? >= speed.0 {
                 prev = SystemTime::now();
-                let halted = STATE
-                    .get()
-                    .ok_or(EmulatorError::OnceEmpty)?
-                    .write()
-                    .await
-                    .tick()
-                    .await?;
 
+                let halted = state.tick();
                 if halted {
-                    halt().await?;
+                    state.halt();
                 }
-            } else {
-                prev = SystemTime::now();
             }
         }
     }
-
-    Ok(())
-}
-
-async fn halt() -> Result<(), EmulatorError> {
-    STATE
-        .get()
-        .ok_or(EmulatorError::OnceEmpty)?
-        .write()
-        .await
-        .speed = None;
-
-    println!(
-        "\n\
-        INFO: CPU halt detected\
-        INFO: stopping clock\
-        > "
-    );
 
     Ok(())
 }
@@ -513,9 +708,71 @@ async fn handle_input(input: String) -> Result<(), EmulatorError> {
             "SET" => double_arg(DoubleCmd::Set, args).await?,
             "PEEK" => single_arg(SingleCmd::Peek, args).await?,
             "POKE" => double_arg(DoubleCmd::Poke, args).await?,
-            "LOAD" => double_arg(DoubleCmd::Load, args).await?,
-            "DROP" => single_arg(SingleCmd::Drop, args).await?,
+            "DROP" => {
+                let ports: Option<Vec<u8>> = args.trim().split(' ').map(|addr| {
+                    match parse_u16(addr) {
+                        Ok(p) => {
+                            if p < 0xFFC0 {
+                                eprintln!("INVALID ARGUMENT: memory mapped I/O can only be mapped to addresses between 0xFFC0-0xFFFF");
+                                None
+                            } else {
+                                Some((p - 0xFFC0) as u8)
+                            }
+                        },
+                        Err(_) => {
+                            eprintln!("INVALID ARGUMENT: unable to parse address {addr}");
+                            None
+                        }
+                    }
+                }).collect();
+
+                let mut state = STATE.get().ok_or(EmulatorError::OnceEmpty)?.write().await;
+
+                if let Some(ports) = ports {
+                    for port in ports {
+                        if let None = state.peripherals.remove(&port) {
+                            println!(
+                                "WARNING: no peripheral found at address {:#06X}",
+                                (port as u16) + 0xFFBF
+                            );
+                        }
+                    }
+                }
+            }
             "RUN" => single_arg(SingleCmd::Run, args).await?,
+            "LOAD" => {
+                match args.trim().split_once(' ') {
+                    Some((pat, rest)) => {
+                        let path = parse_path(pat);
+                        let ports: Option<Vec<u8>> = rest.trim().split(' ').map(|addr| {
+                            match parse_u16(addr) {
+                                Ok(p) => {
+                                    if p < 0xFFC0 {
+                                        eprintln!("INVALID ARGUMENT: memory mapped I/O can only be mapped to addresses between 0xFFC0-0xFFFF");
+                                        None
+                                    } else {
+                                        Some((p - 0xFFC0) as u8)
+                                    }
+                                },
+                                Err(_) => {
+                                    eprintln!("INVALID ARGUMENT: unable to parse address {addr}");
+                                    None
+                                }
+                            }
+                        }).collect();
+
+                        if let Some(ports) = ports {
+                            STATE
+                                .get()
+                                .ok_or(EmulatorError::OnceEmpty)?
+                                .write()
+                                .await
+                                .load(path, ports);
+                        }
+                    }
+                    None => eprintln!("INVALID ARGUMENT: expected at least 2 arguments, found 1"),
+                };
+            }
             _ => eprintln!("UNRECOGNIZED COMMAND: {cmd}"),
         },
         None => match input.trim() {
@@ -546,8 +803,7 @@ async fn handle_input(input: String) -> Result<(), EmulatorError> {
                         .ok_or(EmulatorError::OnceEmpty)?
                         .write()
                         .await
-                        .tick()
-                        .await?;
+                        .tick();
 
                     if halted {
                         eprintln!("INVALID COMMAND: CPU is halted, the clock cannot be stepped")
@@ -662,14 +918,28 @@ async fn single_arg(cmd: SingleCmd, arg: &str) -> Result<(), EmulatorError> {
                         .get(&((addr - 0xFFC0) as u8))
                     {
                         Some(periph) => unsafe {
-                            let r: Result<Symbol<unsafe extern "C" fn() -> u8>, libloading::Error> =
-                                periph.lib.get(b"read");
-                            match r {
-                                Ok(read) => read(),
-                                Err(_) => {
-                                    eprintln!("PERIPHERAL ERROR: peripheral `{}` does not contain `read()` method.", periph.name);
-                                    return Ok(());
+                            if let Ok(stateful_read) = periph
+                                .lib
+                                .library
+                                .get::<unsafe extern "C" fn(*mut (), u8) -> u8>(b"stateful_read")
+                            {
+                                match periph.lib.state {
+                                    Some(state) => stateful_read(state, periph.n),
+                                    None => {
+                                        eprintln!("PERIPHERAL ERROR: unable to call `stateful_read` (state was not initialized)");
+                                        return Ok(());
+                                    }
                                 }
+                            } else if let Ok(read) =
+                                periph
+                                    .lib
+                                    .library
+                                    .get::<unsafe extern "C" fn(u8) -> u8>(b"read")
+                            {
+                                read(periph.n)
+                            } else {
+                                eprintln!("PERIPHERAL ERROR: `read` and `stateful_write` not present in peripheral (peripherals must implement one of these)");
+                                return Ok(());
                             }
                         },
                         None => 0x00,
@@ -701,34 +971,13 @@ async fn single_arg(cmd: SingleCmd, arg: &str) -> Result<(), EmulatorError> {
                 .await
                 .speed = Some((duration, speed));
         }
-        SingleCmd::Drop => {
-            let port = match parse_u8(arg.trim()) {
-                Ok(port) => port,
-                Err(_) => {
-                    eprintln!("INVALID ARGUMENT: unable to parse port");
-                    return Ok(());
-                }
-            };
-
-            let prev = STATE
-                .get()
-                .ok_or(EmulatorError::OnceEmpty)?
-                .write()
-                .await
-                .peripherals
-                .remove(&port);
-
-            if prev.is_none() {
-                println!("WARNING: no peripheral found on port {port:#04X}")
-            }
-        }
     }
 
     Ok(())
 }
 
 async fn double_arg(cmd: DoubleCmd, args: &str) -> Result<(), EmulatorError> {
-    let (arg1, arg2) = match args.trim().split_once(',') {
+    let (arg1, arg2) = match args.trim().split_once(' ') {
         Some(args) => args,
         None => {
             eprintln!("INVALID ARGUMENT: expected two arguments, found one");
@@ -812,67 +1061,33 @@ async fn double_arg(cmd: DoubleCmd, args: &str) -> Result<(), EmulatorError> {
                         .get(&((addr - 0xFFC0) as u8))
                     {
                         Some(periph) => unsafe {
-                            let r: Result<Symbol<unsafe extern "C" fn(u8)>, libloading::Error> =
-                                periph.lib.get(b"write");
-                            match r {
-                                Ok(write) => write(value),
-                                Err(_) => {
-                                    eprintln!("PERIPHERAL ERROR: peripheral `{}` does not contain `write()` method.", periph.name);
-                                    return Ok(());
-                                }
+                            if let Ok(stateful_write) = periph
+                                .lib
+                                .library
+                                .get::<unsafe extern "C" fn(*mut (), u8, u8)>(b"stateful_write")
+                            {
+                                match periph.lib.state {
+                                    Some(state) => stateful_write(state, periph.n, value),
+                                    None => {
+                                        eprintln!("PERIPHERAL ERROR: unable to call `stateful_read` (state was not initialized)");
+                                        return Ok(());
+                                    }
+                                };
+                            } else if let Ok(write) = periph
+                                .lib
+                                .library
+                                .get::<unsafe extern "C" fn(u8, u8)>(b"write")
+                            {
+                                write(periph.n, value);
+                            } else {
+                                eprintln!("PERIPHERAL ERROR: `write` and `stateful_write` not present in peripheral (peripherals must implement one of these)");
+                                return Ok(());
                             }
                         },
                         None => {}
                     }
                 }
             };
-        }
-        DoubleCmd::Load => {
-            let port = match parse_u8(arg2.trim()) {
-                Ok(port) => port,
-                Err(_) => {
-                    eprintln!("INVALID ARGUMENT: unable to parse port");
-                    return Ok(());
-                }
-            };
-
-            if port >= 64 {
-                eprintln!("INVALID ARGUMENT: port out of range (port must be withing 0-63)");
-                return Ok(());
-            }
-            let path = parse_path(arg1);
-
-            let (lib, name) = unsafe {
-                let lib = match Library::new(path) {
-                    Ok(lib) => lib,
-                    Err(err) => {
-                        eprintln!("Unable to load peripheral library: {err}");
-                        return Ok(());
-                    }
-                };
-
-                let name = match lib.get::<unsafe extern "C" fn() -> *const i8>(b"name") {
-                    Ok(name) => CStr::from_ptr(name()).to_str().ok().map(|s| s.to_owned()),
-                    Err(_) => None,
-                }
-                .unwrap_or(arg1.to_owned());
-
-                if let Ok(init) = lib.get::<unsafe extern "C" fn()>(b"init") {
-                    init();
-                }
-
-                (lib, name)
-            };
-
-            let periph = Peripheral { name, lib };
-
-            STATE
-                .get()
-                .ok_or(EmulatorError::OnceEmpty)?
-                .write()
-                .await
-                .peripherals
-                .insert(port, periph);
         }
     }
 
