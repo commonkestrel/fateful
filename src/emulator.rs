@@ -408,45 +408,36 @@ impl State {
             )
         } else if cw.contains(ControlWord::LA) {
             match self.addr {
-                0x0000..=0xFFBF => {
-                    self.mem[self.addr as usize]
-                }
-                0xFFC0..=0xFFFE => {
-                    match self
-                        .peripherals
-                        .get(&((self.addr - 0xFFC0) as u8))
-                    {
-                        Some(periph) => unsafe {
-                            if let Ok(stateful_read) = periph
+                0x0000..=0xFFBF => self.mem[self.addr as usize],
+                0xFFC0..=0xFFFE => match self.peripherals.get(&((self.addr - 0xFFC0) as u8)) {
+                    Some(periph) => unsafe {
+                        if let Ok(stateful_read) =
+                            periph
                                 .lib
                                 .library
                                 .get::<unsafe extern "C" fn(*mut (), u8) -> u8>(b"stateful_read")
-                            {
-                                match periph.lib.state {
-                                    Some(state) => stateful_read(state, periph.n),
-                                    None => {
-                                        eprintln!("PERIPHERAL ERROR: unable to call `stateful_read` (state was not initialized)");
-                                        return true;
-                                    }
+                        {
+                            match periph.lib.state {
+                                Some(state) => stateful_read(state, periph.n),
+                                None => {
+                                    eprintln!("PERIPHERAL ERROR: unable to call `stateful_read` (state was not initialized)");
+                                    return true;
                                 }
-                            } else if let Ok(read) =
-                                periph
-                                    .lib
-                                    .library
-                                    .get::<unsafe extern "C" fn(u8) -> u8>(b"read")
-                            {
-                                read(periph.n)
-                            } else {
-                                eprintln!("PERIPHERAL ERROR: `read` and `stateful_write` not present in peripheral (peripherals must implement one of these)");
-                                return true;
                             }
-                        },
-                        None => 0x00,
-                    }
+                        } else if let Ok(read) = periph
+                            .lib
+                            .library
+                            .get::<unsafe extern "C" fn(u8) -> u8>(b"read")
+                        {
+                            read(periph.n)
+                        } else {
+                            eprintln!("PERIPHERAL ERROR: `read` and `stateful_write` not present in peripheral (peripherals must implement one of these)");
+                            return true;
+                        }
+                    },
+                    None => 0x00,
                 },
-                0xFFFF => {
-                    self.sreg.bits()
-                }
+                0xFFFF => self.sreg.bits(),
             }
         } else if cw.contains(ControlWord::PO) {
             program_byte
@@ -466,38 +457,34 @@ impl State {
                 0x0000..=0xFFBF => {
                     self.mem[self.addr as usize] = bus;
                 }
-                0xFFC0..=0xFFFE => {
-                    match self
-                        .peripherals
-                        .get(&((self.addr - 0xFFC0) as u8))
-                    {
-                        Some(periph) => unsafe {
-                            if let Ok(stateful_write) = periph
+                0xFFC0..=0xFFFE => match self.peripherals.get(&((self.addr - 0xFFC0) as u8)) {
+                    Some(periph) => unsafe {
+                        if let Ok(stateful_write) =
+                            periph
                                 .lib
                                 .library
                                 .get::<unsafe extern "C" fn(*mut (), u8, u8)>(b"stateful_read")
-                            {
-                                match periph.lib.state {
-                                    Some(state) => stateful_write(state, periph.n, bus),
-                                    None => {
-                                        eprintln!("PERIPHERAL ERROR: unable to call `stateful_write` (state was not initialized)");
-                                        return true;
-                                    }
+                        {
+                            match periph.lib.state {
+                                Some(state) => stateful_write(state, periph.n, bus),
+                                None => {
+                                    eprintln!("PERIPHERAL ERROR: unable to call `stateful_write` (state was not initialized)");
+                                    return true;
                                 }
-                            } else if let Ok(write) =
-                                periph
-                                    .lib
-                                    .library
-                                    .get::<unsafe extern "C" fn(u8, u8) -> u8>(b"write")
-                            {
-                                write(periph.n, bus);
-                            } else {
-                                eprintln!("PERIPHERAL ERROR: `read` and `stateful_write` not present in peripheral (peripherals must implement one of these)");
-                                return true;
                             }
-                        },
-                        None => {},
-                    }
+                        } else if let Ok(write) =
+                            periph
+                                .lib
+                                .library
+                                .get::<unsafe extern "C" fn(u8, u8) -> u8>(b"write")
+                        {
+                            write(periph.n, bus);
+                        } else {
+                            eprintln!("PERIPHERAL ERROR: `read` and `stateful_write` not present in peripheral (peripherals must implement one of these)");
+                            return true;
+                        }
+                    },
+                    None => {}
                 },
                 0xFFFF => {
                     self.sreg = SReg::from_bits_retain(bus);
@@ -1030,15 +1017,14 @@ async fn single_arg(cmd: SingleCmd, arg: &str) -> Result<(), EmulatorError> {
                         },
                         None => 0x00,
                     }
-                },
-                0xFFFF => {
-                    STATE
-                        .get()
-                        .ok_or(EmulatorError::OnceEmpty)?
-                        .read()
-                        .await
-                        .sreg.bits()
                 }
+                0xFFFF => STATE
+                    .get()
+                    .ok_or(EmulatorError::OnceEmpty)?
+                    .read()
+                    .await
+                    .sreg
+                    .bits(),
             };
 
             println!("{addr:#06X}: {data:#04X}");
@@ -1180,7 +1166,7 @@ async fn double_arg(cmd: DoubleCmd, args: &str) -> Result<(), EmulatorError> {
                         },
                         None => {}
                     }
-                },
+                }
                 0xFFFF => {
                     STATE
                         .get()
