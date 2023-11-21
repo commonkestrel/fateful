@@ -9,8 +9,7 @@ use assembler::AssemblerArgs;
 mod tests;
 
 use clap::{Parser, Subcommand};
-use clap_verbosity_flag::{Level, WarnLevel};
-use env_logger::Env;
+use clap_verbosity_flag::WarnLevel;
 use shadow_rs::shadow;
 use thiserror::Error;
 

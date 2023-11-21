@@ -12,7 +12,6 @@ use std::sync::OnceLock;
 use clap::Args;
 use clap_verbosity_flag::{Level, WarnLevel};
 use clio::{Input, Output};
-use thiserror::Error;
 
 #[derive(Debug, Args)]
 pub struct AssemblerArgs {
