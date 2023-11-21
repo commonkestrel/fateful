@@ -57,6 +57,12 @@ fn main() -> Result<(), Error> {
     let lex = Token::lexer(&file);
     let stream = Stream::parse(lex)?;
     let microcode = stream.stitch();
+
+    println!("{:?}", microcode[0b0110_1000]);
+    println!("{:?}", microcode[0b0110_1001]);
+    println!("{:?}", microcode[0b0110_1010]);
+    println!("{:?}", microcode[0b0110_1011]);
+
     let (ctrl_low, (ctrl_mid, ctrl_high)): (Vec<u8>, (Vec<u8>, Vec<u8>)) = microcode
         .into_iter()
         .map(|cw| {
@@ -95,6 +101,7 @@ enum Instruction {
     Push = 0xB,
     Pop = 0xC,
     Jnz = 0xD,
+    Halt = 0xF,
 }
 
 #[derive(Debug, Clone)]
@@ -171,6 +178,8 @@ bitflags! {
         const AHI = 1 << 20;
         /// Load Stack Pointer
         const LSP = 1 << 21;
+        /// Set Halt
+        const SH = 1 << 22;
     }
 }
 
@@ -201,6 +210,7 @@ impl FromStr for ControlWord {
             "ali" => Ok(ControlWord::ALI),
             "ahi" => Ok(ControlWord::AHI),
             "lsp" => Ok(ControlWord::LSP),
+            "sh" => Ok(ControlWord::SH),
             _ => Err(Error::UnknownFlag(s.to_owned())),
         }
     }
@@ -225,7 +235,6 @@ impl Stream {
         let mut current_cw = None;
 
         for (token, span) in lex.spanned() {
-            println!("{token:?}");
             match token {
                 Ok(tok) => match tok {
                     Token::Ident(i) => {
@@ -266,6 +275,7 @@ impl Stream {
                                 "push:" => Instruction::Push,
                                 "pop:" => Instruction::Pop,
                                 "jnz:" => Instruction::Jnz,
+                                "halt:" => Instruction::Halt,
                                 _ => return Err(Error::Instruction(i)),
                             });
                             newline = false;
@@ -326,18 +336,22 @@ impl Stream {
             instructions.insert(instr, current_sequence);
         }
 
-        println!("{:?}", instructions);
-
         Ok(Stream { instructions })
     }
 
     fn stitch(self) -> [ControlWord; 1 << 8] {
         let mut ctrl = [ControlWord::empty(); 1 << 8];
 
+        println!("{:?}", self.instructions.get(&Instruction::Mv));
+
         for (instr, seq) in self.instructions {
             let base = (instr as u8) << 4;
             let mut reg = base;
-            let mut imm = base & 0b1000;
+            let mut imm = base | 0b1000;
+
+            if instr == Instruction::Mv {
+                println!("{base}");
+            }
 
             for cw in seq.start {
                 ctrl[reg as usize] = cw;
@@ -354,7 +368,7 @@ impl Stream {
 
             for cw in seq.imm {
                 ctrl[imm as usize] = cw;
-                reg += 1;
+                imm += 1;
             }
 
             for cw in seq.end {
