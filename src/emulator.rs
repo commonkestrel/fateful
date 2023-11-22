@@ -159,6 +159,11 @@ impl Alu {
             _ => {}
         }
     }
+
+    fn clear(&mut self) {
+        self.primary = 0;
+        self.secondary = 0;
+    }
 }
 
 impl Default for Alu {
@@ -228,6 +233,17 @@ impl RegBank {
             _ => unreachable!(),
         }
     }
+
+    fn clear(&mut self) {
+        self.a = 0;
+        self.b = 0;
+        self.c = 0;
+        self.d = 0;
+        self.e = 0;
+        self.f = 0;
+        self.h = 0;
+        self.l = 0;
+    }
 }
 
 impl Default for RegBank {
@@ -250,14 +266,14 @@ impl fmt::Display for RegBank {
         write!(
             f,
             "\
-                REGISTER A: {:#010b}\n\
-                REGISTER B: {:#010b}\n\
-                REGISTER C: {:#010b}\n\
-                REGISTER D: {:#010b}\n\
-                REGISTER E: {:#010b}\n\
-                REGISTER H: {:#010b}\n\
-                REGISTER L: {:#010b}\n\
-                REGISTER F: {:#010b}\n\
+                REGISTER A: {:#04X}\n\
+                REGISTER B: {:#04X}\n\
+                REGISTER C: {:#04X}\n\
+                REGISTER D: {:#04X}\n\
+                REGISTER E: {:#04X}\n\
+                REGISTER H: {:#04X}\n\
+                REGISTER L: {:#04X}\n\
+                REGISTER F: {:#04X}\n\
             ",
             self.a, self.b, self.c, self.d, self.e, self.h, self.l, self.f,
         )
@@ -353,7 +369,7 @@ impl State {
     fn init(program: Box<[u8]>) -> Self {
         State {
             pc: 0,
-            sp: 0xFFFF,
+            sp: 0xFFBF,
             ctrl: Control::default(),
             sreg: SReg::empty(),
             alu: Alu::default(),
@@ -444,6 +460,8 @@ impl State {
         } else {
             0x00
         };
+        // Just for the 'DUMP' command.
+        self.bus = bus;
 
         if cw.contains(ControlWord::LSP) {
             self.addr = self.sp;
@@ -553,6 +571,35 @@ impl State {
             .expect("should be able to write to `stdout`");
     }
 
+    fn reset(&mut self) {
+        self.pc = 0;
+        self.ctrl.clock = 0;
+        self.mem.fill(0);
+        self.sreg = SReg::from_bits_retain(0);
+        self.sp = 0xFFBF;
+        self.alu.clear();
+        self.bank.clear();
+
+        for periph in self.peripherals.values() {
+            unsafe {
+                if let Ok(stateful_reset) = periph
+                        .lib
+                        .library
+                        .get::<unsafe extern "C" fn(*mut ())>(b"stateful_reset")
+                    {
+                    match periph.lib.state {
+                        Some(state) => stateful_reset(state),
+                        None => {
+                                eprintln!("PERIPHERAL ERROR: unable to call `stateful_reset` (state was not initialized)");
+                        }
+                    }
+                } else if let Ok(reset) = periph.lib.library.get::<unsafe extern "C" fn()>(b"reset") {
+                        reset();
+                }
+            }
+        }
+    }
+
     fn cw(&self) -> ControlWord {
         let index = ((self.ctrl.head.instruction() as u8) << 4
             | (self.ctrl.head.immediate() as u8) << 3
@@ -647,14 +694,16 @@ impl fmt::Display for State {
         write!(
             f,
             "\
-                PROGRAM COUNTER: {:#04X}\n\
-                BUS: {}\n\
+                PROGRAM COUNTER: {:#06X}\n\
+                STACK POINTER: {:#06X}\n\
+                BUS: {:#04X}\n\
                 {}\
                 CW: {:?}\n\
                 PERIPHERALS: {periph}\n\
                 INSTRUCTION: {:#010b}\n\
             ",
             self.pc,
+            self.sp,
             self.bus,
             self.bank,
             self.cw(),
@@ -884,6 +933,14 @@ async fn handle_input(input: String) -> Result<(), EmulatorError> {
                 } else {
                     eprintln!("INVALID COMMAND: STEP can only be used if the CPU is stopped")
                 }
+            },
+            "RESET" => {
+                STATE
+                    .get()
+                    .ok_or(EmulatorError::OnceEmpty)?
+                    .write()
+                    .await
+                    .reset()
             }
             "HELP" => help(),
             "STOP" => {
@@ -921,6 +978,7 @@ fn help() {
         DROP <port>         : Disconnects the peripheral on the given port, unloading the module.\n\
         DUMP                : Dumps the current machine state\n\
         STEP                : Pulses the clock a single time (only available if the CPU is stopped)\n\
+        RESET               : Resets the program counter to 0x0000\n\
         STOP                : Stops the CPU clock\n\
         QUIT                : Quits the program\n\
         HELP                : Prints this message\
