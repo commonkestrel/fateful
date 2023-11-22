@@ -1,3 +1,4 @@
+//! 
 #![allow(private_interfaces)]
 
 use byte_strings::c_str;
@@ -36,6 +37,21 @@ struct State {
     handle: JoinHandle<()>,
 }
 
+/// Called once when this peripheral is first loaded.
+/// Returns a pointer to the shared state,
+/// hence the name `stateful_init` rather than just `init`.
+///
+/// # Warning
+///
+/// Any spawned threads *must* be `join`ed before or on drop.
+/// If any threads are left hanging, this will cause the emulator to crash.
+/// 
+/// # Safety
+/// 
+/// The global state *must* be moved to the heap,
+/// otherwise the state will be dropped from the
+/// stack and this function will return a dangling pointer.
+/// You can do this with a [`Box`], I was just too lazy deal with it.
 #[no_mangle]
 pub unsafe extern "C" fn stateful_init(n: u8) -> *mut State {
     if n != PORTS {
@@ -55,8 +71,9 @@ pub unsafe extern "C" fn stateful_init(n: u8) -> *mut State {
     state
 }
 
+/// Called every time a connected port is read from.
 #[no_mangle]
-pub unsafe extern "C" fn stateful_read(_state: *mut State, n: u8) -> u8 {
+pub unsafe extern "C" fn read(n: u8) -> u8 {
     match n {
         0 => *IN.lock().unwrap(),
         1 => *OUT.lock().unwrap(),
@@ -64,6 +81,9 @@ pub unsafe extern "C" fn stateful_read(_state: *mut State, n: u8) -> u8 {
     }
 }
 
+/// Called every time a connected port is written to.
+/// Due to the name `stateful_write`,
+/// it is passed a pointer to the shared state
 #[no_mangle]
 pub unsafe extern "C" fn stateful_write(state: *mut State, n: u8, data: u8) {
     if n == 1 {
@@ -76,6 +96,14 @@ pub unsafe extern "C" fn stateful_write(state: *mut State, n: u8, data: u8) {
     }
 }
 
+/// Called after all connected ports have been dropped.
+/// Due to the name `stateful_drop` it is passed a pointer to the shared state.
+///
+/// # Important
+/// 
+/// As mentioned in [`stateful_init`],
+/// any previously spawned threads *must* be joined on or before drop.
+/// If any threads are left hanging, this will cause the emulator to crash.
 #[no_mangle]
 pub unsafe extern "C" fn stateful_drop(s: *mut State) {
     let state = ptr::read(s);
