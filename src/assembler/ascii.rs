@@ -8,19 +8,7 @@ pub struct AsciiStr {
 }
 
 impl AsciiStr {
-    pub fn from_buffer(buf: &[u8]) -> Result<Self, ()> {
-        for byte in buf {
-            if *byte > 127 {
-                return Err(());
-            }
-        }
-
-        Ok(AsciiStr {
-            inner: Vec::from(buf),
-        })
-    }
-
-    pub unsafe fn from_buffer_unchecked(buf: &[u8]) -> Self {
+    pub unsafe fn from_bytes_unchecked(buf: &[u8]) -> Self {
         AsciiStr {
             inner: Vec::from(buf),
         }
@@ -155,7 +143,7 @@ pub fn unescape_str<'a>(s: &'a str) -> Result<AsciiStr, UnescapeError> {
         ));
     }
 
-    unsafe { Ok(AsciiStr::from_buffer_unchecked(simple.as_bytes())) }
+    unsafe { Ok(AsciiStr::from_bytes_unchecked(simple.as_bytes())) }
 }
 
 mod tests {
