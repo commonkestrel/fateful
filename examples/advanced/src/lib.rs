@@ -1,122 +1,62 @@
-//! 
-#![allow(private_interfaces)]
+use std::{sync::{mpsc::{SyncSender, sync_channel, Receiver, TryRecvError}, Mutex}, thread::{JoinHandle, self}, time::Duration};
 
-use byte_strings::c_str;
+use fateful_peripheral::{ Peripheral, peripheral };
 use minifb::{Key, KeyRepeat, Window, WindowOptions};
-use std::{
-    alloc::{alloc, dealloc, Layout},
-    ffi::{c_char, c_int},
-    mem::ManuallyDrop,
-    ptr,
-    sync::{
-        mpsc::{sync_channel, Receiver, SyncSender, TryRecvError},
-        Mutex,
-    },
-    thread::{self, JoinHandle},
-    time::Duration,
-};
+use anyhow::{ Result, bail };
 
 const PORTS: u8 = 2;
 const BIT_SIZE: usize = 100;
 const WIDTH: usize = 8 * BIT_SIZE;
 const HEIGHT: usize = 2 * BIT_SIZE;
 
-static OUT: Mutex<u8> = Mutex::new(0);
 static IN: Mutex<u8> = Mutex::new(0);
-
-#[no_mangle]
-pub static mut ERROR: c_int = 0;
+static OUT: Mutex<u8> = Mutex::new(0);
 
 enum Event {
     Redraw,
     Stop,
 }
 
+#[peripheral(name = b"Digital I/O")]
 struct State {
     events: SyncSender<Event>,
     handle: JoinHandle<()>,
 }
 
-/// Called once when this peripheral is first loaded.
-/// Returns a pointer to the shared state,
-/// hence the name `stateful_init` rather than just `init`.
-///
-/// # Warning
-///
-/// Any spawned threads *must* be `join`ed before or on drop.
-/// If any threads are left hanging, this will cause the emulator to crash.
-/// 
-/// # Safety
-/// 
-/// The global state *must* be moved to the heap,
-/// otherwise the state will be dropped from the
-/// stack and this function will return a dangling pointer.
-/// You can do this with a [`Box`], I was just too lazy deal with it.
-#[no_mangle]
-pub unsafe extern "C" fn stateful_init(n: u8) -> *mut State {
-    if n != PORTS {
-        ERROR = -1;
-        return ptr::null_mut();
+impl Peripheral for State {
+    fn init(ports: u8) -> Result<Self> {
+        if ports != PORTS {
+            bail!("expected `2` connected ports, found `{ports}`");
+        }
+
+        let (tx, rx) = sync_channel(16);
+
+        let handle = thread::spawn(move || {
+            background(rx);
+        });
+
+        Ok(State { handle, events: tx })
     }
 
-    let (tx, rx) = sync_channel(16);
-
-    let handle = thread::spawn(move || {
-        background(rx);
-    });
-
-    let state = alloc(Layout::new::<State>()) as *mut State;
-    state.write(State { handle, events: tx });
-
-    state
-}
-
-/// Called every time a connected port is read from.
-#[no_mangle]
-pub unsafe extern "C" fn read(n: u8) -> u8 {
-    match n {
-        0 => *IN.lock().unwrap(),
-        1 => *OUT.lock().unwrap(),
-        _ => unreachable!(),
+    fn read(&mut self, port: u8) -> u8 {
+        match port {
+            0 => *IN.lock().unwrap(),
+            1 => *OUT.lock().unwrap(),
+            _ => unreachable!(),
+        }
     }
-}
 
-/// Called every time a connected port is written to.
-/// Due to the name `stateful_write`,
-/// it is passed a pointer to the shared state
-#[no_mangle]
-pub unsafe extern "C" fn stateful_write(state: *mut State, n: u8, data: u8) {
-    if n == 1 {
-        *OUT.lock().unwrap() = data;
-        // Use ManuallyDrop to prevent `events` from disconnecting
-        ManuallyDrop::new(ptr::read(state))
-            .events
-            .send(Event::Redraw)
-            .unwrap();
+    fn write(&mut self, port: u8, data: u8) {
+        if port == 1 {
+            *OUT.lock().unwrap() = data;
+            self.events.send(Event::Redraw).unwrap();
+        }
     }
-}
 
-/// Called after all connected ports have been dropped.
-/// Due to the name `stateful_drop` it is passed a pointer to the shared state.
-///
-/// # Important
-/// 
-/// As mentioned in [`stateful_init`],
-/// any previously spawned threads *must* be joined on or before drop.
-/// If any threads are left hanging, this will cause the emulator to crash.
-#[no_mangle]
-pub unsafe extern "C" fn stateful_drop(s: *mut State) {
-    let state = ptr::read(s);
-
-    state.events.send(Event::Stop).unwrap();
-    state.handle.join().expect("background thread has panicked");
-
-    dealloc(s as *mut u8, Layout::new::<State>());
-}
-
-#[no_mangle]
-pub const extern "C" fn name() -> *const c_char {
-    c_str!("Digital I/O").as_ptr()
+    fn drop(self) {
+        self.events.send(Event::Stop).unwrap();
+        self.handle.join().expect("background thread has panicked");
+    }
 }
 
 fn background(stop_rx: Receiver<Event>) {
@@ -130,10 +70,7 @@ fn background(stop_rx: Receiver<Event>) {
     while window.is_open() {
         let mut redraw = match stop_rx.try_recv() {
             Ok(Event::Redraw) => true,
-            Ok(Event::Stop) => {
-                println!("stop");
-                return;
-            }
+            Ok(Event::Stop) => return,
             Err(TryRecvError::Empty) => false,
             Err(TryRecvError::Disconnected) => return,
         };

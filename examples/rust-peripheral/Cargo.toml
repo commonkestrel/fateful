@@ -10,4 +10,5 @@ crate-type = ["rlib", "cdylib"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-byte-strings = "0.3.1"
+fateful_peripheral = { git = "https://github.com/commonkestrel/fateful_peripheral" }
+anyhow = "1.0"
