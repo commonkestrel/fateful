@@ -1,7 +1,7 @@
 use std::{
     cmp::Ordering,
     collections::HashMap,
-    ffi::{c_char, c_int, CStr},
+    ffi::{c_char, c_int, c_void, CStr},
     fmt,
     io::{Read, Write},
     str::FromStr,
@@ -24,6 +24,20 @@ use thiserror::Error;
 const CTRL_LOW: &[u8; 1 << 8] = include_bytes!(concat!(env!("OUT_DIR"), "/ctrl_low.rom"));
 const CTRL_MID: &[u8; 1 << 8] = include_bytes!(concat!(env!("OUT_DIR"), "/ctrl_mid.rom"));
 const CTRL_HIGH: &[u8; 1 << 8] = include_bytes!(concat!(env!("OUT_DIR"), "/ctrl_high.rom"));
+
+type NameFn = unsafe extern "C" fn() -> *const c_char;
+type InitFn = unsafe extern "C" fn(u8) -> c_int;
+type StatefulInitFn = unsafe extern "C" fn(u8) -> *mut c_void;
+type ReadFn = unsafe extern "C" fn(u8) -> u8;
+type StatefulReadFn = unsafe extern "C" fn(*mut c_void, u8) -> u8;
+type WriteFn = unsafe extern "C" fn(u8, u8);
+type StatefulWriteFn = unsafe extern "C" fn(*mut c_void, u8, u8);
+type DropFn = unsafe extern "C" fn();
+type StatefulDropFn = unsafe extern "C" fn(*mut c_void);
+type ResetFn = unsafe extern "C" fn();
+type StatefulResetFn = unsafe extern "C" fn(*mut c_void);
+type LastErrLen = unsafe extern "C" fn() -> c_int;
+type GetLastErr = unsafe extern "C" fn(*mut c_char, c_int) -> c_int;
 
 #[derive(Error, Debug)]
 pub enum EmulatorError {
@@ -431,7 +445,7 @@ impl State {
                             periph
                                 .lib
                                 .library
-                                .get::<unsafe extern "C" fn(*mut (), u8) -> u8>(b"stateful_read")
+                                .get::<StatefulReadFn>(b"stateful_read")
                         {
                             match periph.lib.state {
                                 Some(state) => stateful_read(state, periph.n),
@@ -443,7 +457,7 @@ impl State {
                         } else if let Ok(read) = periph
                             .lib
                             .library
-                            .get::<unsafe extern "C" fn(u8) -> u8>(b"read")
+                            .get::<ReadFn>(b"read")
                         {
                             read(periph.n)
                         } else {
@@ -481,7 +495,7 @@ impl State {
                             periph
                                 .lib
                                 .library
-                                .get::<unsafe extern "C" fn(*mut (), u8, u8)>(b"stateful_read")
+                                .get::<StatefulWriteFn>(b"stateful_write")
                         {
                             match periph.lib.state {
                                 Some(state) => stateful_write(state, periph.n, bus),
@@ -494,11 +508,11 @@ impl State {
                             periph
                                 .lib
                                 .library
-                                .get::<unsafe extern "C" fn(u8, u8) -> u8>(b"write")
+                                .get::<WriteFn>(b"write")
                         {
                             write(periph.n, bus);
                         } else {
-                            eprintln!("PERIPHERAL ERROR: `read` and `stateful_write` not present in peripheral (peripherals must implement one of these)");
+                            eprintln!("PERIPHERAL ERROR: `read` and `stateful_read` not present in peripheral (peripherals must implement one of these)");
                             return true;
                         }
                     },
@@ -585,7 +599,7 @@ impl State {
                 if let Ok(stateful_reset) = periph
                         .lib
                         .library
-                        .get::<unsafe extern "C" fn(*mut ())>(b"stateful_reset")
+                        .get::<StatefulResetFn>(b"stateful_reset")
                     {
                     match periph.lib.state {
                         Some(state) => stateful_reset(state),
@@ -593,7 +607,7 @@ impl State {
                                 eprintln!("PERIPHERAL ERROR: unable to call `stateful_reset` (state was not initialized)");
                         }
                     }
-                } else if let Ok(reset) = periph.lib.library.get::<unsafe extern "C" fn()>(b"reset") {
+                } else if let Ok(reset) = periph.lib.library.get::<ResetFn>(b"reset") {
                         reset();
                 }
             }
@@ -622,32 +636,42 @@ impl State {
                 }
             };
 
-            let name = match lib.get::<unsafe extern "C" fn() -> *const c_char>(b"name") {
+            let name = match lib.get::<NameFn>(b"name") {
                 Ok(name) => CStr::from_ptr(name()).to_str().ok().map(|s| s.to_owned()),
                 Err(_) => None,
             }
             .unwrap_or(path);
 
-            let state = if let Ok(stateful_init) =
-                lib.get::<unsafe extern "C" fn(u8) -> *mut ()>(b"stateful_init")
-            {
-                Some(stateful_init(ports.len() as u8))
-            } else if let Ok(init) = lib.get::<unsafe extern "C" fn(u8)>(b"init") {
-                init(ports.len() as u8);
-                None
+            let (state, err) = if let Ok(stateful_init) = lib.get::<StatefulInitFn>(b"stateful_init") {
+                let state = stateful_init(ports.len() as u8);
+                (Some(state), if state.is_null() {-1} else {0})
+            } else if let Ok(init) = lib.get::<InitFn>(b"init") {
+                let err = init(ports.len() as u8);
+                (None, err)
             } else {
-                None
+                (None, 0)
             };
 
-            match lib.get::<*const c_int>(b"ERROR") {
-                Ok(err) => match **err {
-                    0 => {}
-                    err => {
-                        eprintln!("PERIPHERAL ERROR: initialization failed with exit code {err}");
-                        return;
-                    }
-                },
-                Err(_) => {}
+            if err != 0 {
+                let msg: Result<(Vec<u8>, c_int), libloading::Error> = lib.get::<LastErrLen>(b"last_error_length").map(|lel| {
+                    vec![0; lel() as usize]
+                }).and_then(|mut buf| {
+                    let written = lib.get::<GetLastErr>(b"get_last_error")?(buf.as_mut_ptr() as *mut c_char, buf.len() as c_int);
+                    Ok((buf, written))
+                });
+
+                match (msg, state.is_some()) {
+                    (Ok((buffer, 1..)), st) => match CStr::from_bytes_with_nul_unchecked(&buffer).to_str() {
+                        Ok(msg) => eprintln!("PERIPHERAL ERROR: {msg}"),
+                        Err(_) => match st {
+                            true => eprintln!("PERIPHRAL ERROR: initialization failed (`stateful_init` returned a null pointer)"),
+                            false => eprintln!("PERIPHERAL ERROR: initialization failed (`init` returned with exit code {err})"),
+                        }
+                    },
+                    (_, true) => eprintln!("PERIPHRAL ERROR: initialization failed (`stateful_init` returned a null pointer)"),
+                    (_, false) => eprintln!("PERIPHERAL ERROR: initialization failed (`init` returned with exit code {err})"),
+                }
+                return;
             }
 
             (lib, name, state)
@@ -729,7 +753,7 @@ enum DoubleCmd {
 struct Lib {
     name: String,
     library: Library,
-    state: Option<*mut ()>,
+    state: Option<*mut c_void>,
 }
 
 impl Drop for Lib {
@@ -737,7 +761,7 @@ impl Drop for Lib {
         unsafe {
             if let Ok(stateful_drop) = self
                 .library
-                .get::<unsafe extern "C" fn(*mut ())>(b"stateful_drop")
+                .get::<StatefulDropFn>(b"stateful_drop")
             {
                 match self.state {
                     Some(state) => stateful_drop(state),
@@ -745,7 +769,7 @@ impl Drop for Lib {
                         eprintln!("PERIPHERAL ERROR: unable to call `stateful_drop` (state was not initialized)");
                     }
                 }
-            } else if let Ok(stateless_drop) = self.library.get::<unsafe extern "C" fn()>(b"drop") {
+            } else if let Ok(stateless_drop) = self.library.get::<DropFn>(b"drop") {
                 stateless_drop();
             }
         }
@@ -1052,7 +1076,7 @@ async fn single_arg(cmd: SingleCmd, arg: &str) -> Result<(), EmulatorError> {
                             if let Ok(stateful_read) = periph
                                 .lib
                                 .library
-                                .get::<unsafe extern "C" fn(*mut (), u8) -> u8>(b"stateful_read")
+                                .get::<StatefulReadFn>(b"stateful_read")
                             {
                                 match periph.lib.state {
                                     Some(state) => stateful_read(state, periph.n),
@@ -1065,11 +1089,11 @@ async fn single_arg(cmd: SingleCmd, arg: &str) -> Result<(), EmulatorError> {
                                 periph
                                     .lib
                                     .library
-                                    .get::<unsafe extern "C" fn(u8) -> u8>(b"read")
+                                    .get::<ReadFn>(b"read")
                             {
                                 read(periph.n)
                             } else {
-                                eprintln!("PERIPHERAL ERROR: `read` and `stateful_write` not present in peripheral (peripherals must implement one of these)");
+                                eprintln!("PERIPHERAL ERROR: `read` and `stateful_read` not present in peripheral (peripherals must implement one of these)");
                                 return Ok(());
                             }
                         },
@@ -1202,7 +1226,7 @@ async fn double_arg(cmd: DoubleCmd, args: &str) -> Result<(), EmulatorError> {
                             if let Ok(stateful_write) = periph
                                 .lib
                                 .library
-                                .get::<unsafe extern "C" fn(*mut (), u8, u8)>(b"stateful_write")
+                                .get::<StatefulWriteFn>(b"stateful_write")
                             {
                                 match periph.lib.state {
                                     Some(state) => stateful_write(state, periph.n, value),
@@ -1214,7 +1238,7 @@ async fn double_arg(cmd: DoubleCmd, args: &str) -> Result<(), EmulatorError> {
                             } else if let Ok(write) = periph
                                 .lib
                                 .library
-                                .get::<unsafe extern "C" fn(u8, u8)>(b"write")
+                                .get::<WriteFn>(b"write")
                             {
                                 write(periph.n, value);
                             } else {
