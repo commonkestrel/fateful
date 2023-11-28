@@ -20,6 +20,7 @@ use clio::Input;
 use libloading::Library;
 use modular_bitfield::prelude::*;
 use thiserror::Error;
+use phf::{ Map, phf_map };
 
 const CTRL_LOW: &[u8; 1 << 8] = include_bytes!(concat!(env!("OUT_DIR"), "/ctrl_low.rom"));
 const CTRL_MID: &[u8; 1 << 8] = include_bytes!(concat!(env!("OUT_DIR"), "/ctrl_mid.rom"));
@@ -60,6 +61,153 @@ pub struct EmulatorArgs {
     /// Input program ROM
     #[clap(value_parser, default_value = "-")]
     input: Input,
+}
+
+enum Command {
+    Get,
+    Set,
+    Peek,
+    Poke,
+    Drop,
+    Run,
+    Load,
+    Dump,
+    Quit,
+    Step,
+    Reset,
+    Help,
+    Stop,
+    Blank,
+}
+
+impl Command {
+    fn help(&self) -> &'static str {
+        match self {
+            Command::Get => "\
+                GET <register>:\n\
+                \n\
+                Gets the current state of the selected register.\n\
+                \n\
+                `register` must be in the range 0 through 8 (exclusive).\n\
+            ",
+            Command::Set => "\
+                SET <register> <value>:\n\
+                \n\
+                Sets the value in the selected register to `value`.\n\
+                \n\
+                `register` must be in the range 0 through 7 (inclusive).\n\
+                `value` must be in the range 0 through 255 (inclusive).\n\
+            ",
+            Command::Peek => "\
+                PEEK <address>:\n\
+                \n\
+                Gets the current value at the selected memory address.
+                \n\
+                `address` must be in the range 0x0000 through 0xFFBF (inclusive).\n\
+            ",
+            Command::Poke => "\
+                POKE <address> <value>\n\
+                \n\
+                Writes the given value to the selected memory address.
+                \n\
+                `address` must be in the range 0x0000 through 0xFFBF (inclusive).\n\
+                `value` must be in the range 0 through 255 (inclusive).\n\
+            ",
+            Command::Drop => "\
+                DROP [port...]:\n\
+                \n\
+                If 1 or more ports are provided, each port is disconnected from the corresponding peripheral (if one is connected).\n\
+                If all ports connected to a peripheral are disconnected, the peripheral is dropped.\n\
+                If no ports are provided, all ports are disconnected, dropping all peripherals.\n\
+            ",
+            Command::Run => "\
+                RUN <speed>:\n\
+                \n\
+                Runs the CPU at the given speed.\n\
+                If no speed is supplied, or if the given speed is `0`,\n\
+                the CPU will run at maximum speed.\n\
+                \n\
+                `speed` is measured in hz.\n\
+            ",
+            Command::Load => "\
+                LOAD <module> [port...]\n\
+                \n\
+                Loads the given module as a peripheral, connecting it to the given ports.\n\
+                If no ports are supplied, the module will not be initialized.\n\
+                Read more about peripheral modules in the README\n\
+                \n\
+                `module` must be a valid path to a shared library.\n\
+                Each `port` must be within the range 0xFFC0 through 0xFFFE (inclusive).\n\
+            ",
+            Command::Dump => "\
+                DUMP:\n\
+                \n\
+                Prints the current machine state, including the:\n\
+                - Program Counter\n\
+                - Stack Pointer\n\
+                - Bus\n\
+                - Register Bank\n\
+                - Control Word\n\
+                - Instruction Register\n\
+                - Attached Peripherals\n\
+            ",
+            Command::Quit => "\
+                QUIT:\n\
+                \n\
+                Exits the emulator after cleaning up.\n\
+            ",
+            Command::Step => "\
+                STEP:\n\
+                \n\
+                Steps the CPU clock a single time.\n\
+                Cannot be used while the CPU is running.\n\
+            ",
+            Command::Reset => "\
+                RESET:\n\
+                \n\
+                Resets the CPU to it's initial state.\n\
+                While `reset` or `stateful_reset` is called on all peripherals,\n\
+                no guarantees can be made that all peripherals will be reset to their initial state.\n\
+            ",
+            Command::Help => "\
+                HELP [command]\n\
+                \n\
+                With no given command, prints a short help message for each command.\n\
+                With a selected command, prints a more detailed help message for the selected command.\n\
+            ",
+            Command::Stop => "\
+                STOP:\n\
+                \n\
+                Stops the CPU clock.\n\
+                Enables the use of `STEP`.\n\
+            ",
+            Command::Blank => unreachable!(),
+        }
+    }
+}
+
+impl FromStr for Command {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "GET" => Ok(Command::Get),
+            "SET" => Ok(Command::Set),
+            "PEEK" => Ok(Command::Peek),
+            "POKE" => Ok(Command::Poke),
+            "DROP" => Ok(Command::Drop),
+            "RUN" => Ok(Command::Run),
+            "LOAD" => Ok(Command::Load),
+            "DUMP" => Ok(Command::Dump),
+            "QUIT" => Ok(Command::Quit),
+            "STEP" => Ok(Command::Step),
+            "RESET" => Ok(Command::Reset),
+            "HELP" => Ok(Command::Help),
+            "STOP" => Ok(Command::Stop),
+            "" => Ok(Command::Blank),
+            _ => Err(())
+        }
+    }
 }
 
 bitflags! {
@@ -576,8 +724,7 @@ impl State {
 
         print!(
             "\n\
-            INFO: CPU halt detected\n\
-            INFO: stopping clock\n\
+            INFO: halt detected\n\
             > "
         );
         std::io::stdout()
@@ -722,9 +869,9 @@ impl fmt::Display for State {
                 STACK POINTER: {:#06X}\n\
                 BUS: {:#04X}\n\
                 {}\
-                CW: {:?}\n\
-                PERIPHERALS: {periph}\n\
+                CONTROL WORD: {:?}\n\
                 INSTRUCTION: {:#010b}\n\
+                PERIPHERALS: {periph}\n\
             ",
             self.pc,
             self.sp,
@@ -826,15 +973,20 @@ pub async fn emulate(mut args: EmulatorArgs) -> Result<(), EmulatorError> {
 
         let mut state = STATE.get().ok_or(EmulatorError::OnceEmpty)?.write().await;
 
-        if let Some(speed) = state.speed {
-            if prev.elapsed()? >= speed.0 {
-                prev = SystemTime::now();
+        let tick = match state.speed {
+            Some(speed) =>  prev.elapsed()? >= speed.0,
+            None => false,
+        };
 
-                let halted = state.tick();
-                if halted {
-                    state.halt();
-                }
+        if tick {
+            prev = SystemTime::now();
+
+            let halted = state.tick();
+            if halted {
+                state.halt();
             }
+        } else {
+            async_std::task::sleep(Duration::from_millis(1)).await;
         }
     }
 
@@ -849,7 +1001,7 @@ async fn handle_input(input: String) -> Result<(), EmulatorError> {
             "PEEK" => single_arg(SingleCmd::Peek, args).await?,
             "POKE" => double_arg(DoubleCmd::Poke, args).await?,
             "DROP" => {
-                let ports: Option<Vec<u8>> = args.trim().split(' ').map(|addr| {
+                let ports: Option<Vec<u8>> = args.trim().split(' ').filter(|arg| arg.trim().len() > 0).map(|addr| {
                     match parse_u16(addr) {
                         Ok(p) => {
                             if p < 0xFFC0 {
@@ -887,7 +1039,7 @@ async fn handle_input(input: String) -> Result<(), EmulatorError> {
                 match args.trim().split_once(' ') {
                     Some((pat, rest)) => {
                         let path = parse_path(pat);
-                        let ports: Option<Vec<u8>> = rest.trim().split(' ').map(|addr| {
+                        let ports: Option<Vec<u8>> = rest.trim().split(' ').filter(|arg| arg.trim().len() > 0).map(|addr| {
                             match parse_u16(addr) {
                                 Ok(p) => {
                                     if p < 0xFFC0 {
@@ -919,7 +1071,7 @@ async fn handle_input(input: String) -> Result<(), EmulatorError> {
                     None => eprintln!("INVALID ARGUMENT: expected at least 2 arguments, found 1"),
                 };
             }
-            _ => eprintln!("UNRECOGNIZED COMMAND: {cmd}"),
+            _ => eprintln!("UNRECOGNIZED COMMAND: {cmd} "),
         },
         None => match input.trim() {
             "DUMP" => print!(
