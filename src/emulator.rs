@@ -20,7 +20,6 @@ use clio::Input;
 use libloading::Library;
 use modular_bitfield::prelude::*;
 use thiserror::Error;
-use phf::{ Map, phf_map };
 
 const CTRL_LOW: &[u8; 1 << 8] = include_bytes!(concat!(env!("OUT_DIR"), "/ctrl_low.rom"));
 const CTRL_MID: &[u8; 1 << 8] = include_bytes!(concat!(env!("OUT_DIR"), "/ctrl_mid.rom"));
