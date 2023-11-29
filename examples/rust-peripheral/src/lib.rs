@@ -1,5 +1,5 @@
-use fateful_peripheral::{ Peripheral, peripheral };
 use anyhow::Result;
+use fateful_peripheral::{peripheral, Peripheral};
 
 #[peripheral(name = b"Rust Example")]
 struct State {
@@ -7,15 +7,15 @@ struct State {
 }
 
 impl Peripheral for State {
-    fn init(ports: u8) -> Result<Self> {
+    fn init(_ports: u8) -> Result<Self> {
         Ok(State { data: 0 })
     }
 
-    fn read(&mut self, port: u8) -> u8 {
+    fn read(&mut self, _port: u8) -> u8 {
         self.data
     }
 
-    fn write(&mut self, port: u8, data: u8) {
+    fn write(&mut self, _port: u8, data: u8) {
         self.data = data;
     }
 

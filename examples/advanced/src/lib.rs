@@ -1,8 +1,15 @@
-use std::{sync::{mpsc::{SyncSender, sync_channel, Receiver, TryRecvError}, Mutex}, thread::{JoinHandle, self}, time::Duration};
+use std::{
+    sync::{
+        mpsc::{sync_channel, Receiver, SyncSender, TryRecvError},
+        Mutex,
+    },
+    thread::{self, JoinHandle},
+    time::Duration,
+};
 
-use fateful_peripheral::{ Peripheral, peripheral };
+use anyhow::{bail, Result};
+use fateful_peripheral::{peripheral, Peripheral};
 use minifb::{Key, KeyRepeat, Window, WindowOptions};
-use anyhow::{ Result, bail };
 
 const PORTS: u8 = 2;
 const BIT_SIZE: usize = 100;

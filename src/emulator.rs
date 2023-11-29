@@ -20,7 +20,6 @@ use clio::Input;
 use libloading::Library;
 use modular_bitfield::prelude::*;
 use thiserror::Error;
-use phf::{ Map, phf_map };
 
 const CTRL_LOW: &[u8; 1 << 8] = include_bytes!(concat!(env!("OUT_DIR"), "/ctrl_low.rom"));
 const CTRL_MID: &[u8; 1 << 8] = include_bytes!(concat!(env!("OUT_DIR"), "/ctrl_mid.rom"));
@@ -47,7 +46,7 @@ pub enum EmulatorError {
     #[error("error in stdin channel")]
     StdIn,
     #[error("unable to print to stdout")]
-    StdOut(std::io::Error),
+    Out(std::io::Error),
     #[error("error getting time elapsed")]
     Time(#[from] SystemTimeError),
     #[error("global state already set")]
@@ -106,7 +105,7 @@ impl Command {
                 `address` must be in the range 0x0000 through 0xFFBF (inclusive).\n\
             ",
             Command::Poke => "\
-                POKE <address> <value>\n\
+                POKE <address> <value>:\n\
                 \n\
                 Writes the given value to the selected memory address.
                 \n\
@@ -130,7 +129,7 @@ impl Command {
                 `speed` is measured in hz.\n\
             ",
             Command::Load => "\
-                LOAD <module> [port...]\n\
+                LOAD <module> [port...]:\n\
                 \n\
                 Loads the given module as a peripheral, connecting it to the given ports.\n\
                 If no ports are supplied, the module will not be initialized.\n\
@@ -170,7 +169,7 @@ impl Command {
                 no guarantees can be made that all peripherals will be reset to their initial state.\n\
             ",
             Command::Help => "\
-                HELP [command]\n\
+                HELP [command]:\n\
                 \n\
                 With no given command, prints a short help message for each command.\n\
                 With a selected command, prints a more detailed help message for the selected command.\n\
@@ -205,7 +204,7 @@ impl FromStr for Command {
             "HELP" => Ok(Command::Help),
             "STOP" => Ok(Command::Stop),
             "" => Ok(Command::Blank),
-            _ => Err(())
+            _ => Err(()),
         }
     }
 }
@@ -590,10 +589,7 @@ impl State {
                 0xFFC0..=0xFFFE => match self.peripherals.get(&((self.addr - 0xFFC0) as u8)) {
                     Some(periph) => unsafe {
                         if let Ok(stateful_read) =
-                            periph
-                                .lib
-                                .library
-                                .get::<StatefulReadFn>(b"stateful_read")
+                            periph.lib.library.get::<StatefulReadFn>(b"stateful_read")
                         {
                             match periph.lib.state {
                                 Some(state) => stateful_read(state, periph.n),
@@ -602,11 +598,7 @@ impl State {
                                     return true;
                                 }
                             }
-                        } else if let Ok(read) = periph
-                            .lib
-                            .library
-                            .get::<ReadFn>(b"read")
-                        {
+                        } else if let Ok(read) = periph.lib.library.get::<ReadFn>(b"read") {
                             read(periph.n)
                         } else {
                             eprintln!("PERIPHERAL ERROR: `read` and `stateful_write` not present in peripheral (peripherals must implement one of these)");
@@ -640,10 +632,7 @@ impl State {
                 0xFFC0..=0xFFFE => match self.peripherals.get(&((self.addr - 0xFFC0) as u8)) {
                     Some(periph) => unsafe {
                         if let Ok(stateful_write) =
-                            periph
-                                .lib
-                                .library
-                                .get::<StatefulWriteFn>(b"stateful_write")
+                            periph.lib.library.get::<StatefulWriteFn>(b"stateful_write")
                         {
                             match periph.lib.state {
                                 Some(state) => stateful_write(state, periph.n, bus),
@@ -652,12 +641,7 @@ impl State {
                                     return true;
                                 }
                             }
-                        } else if let Ok(write) =
-                            periph
-                                .lib
-                                .library
-                                .get::<WriteFn>(b"write")
-                        {
+                        } else if let Ok(write) = periph.lib.library.get::<WriteFn>(b"write") {
                             write(periph.n, bus);
                         } else {
                             eprintln!("PERIPHERAL ERROR: `read` and `stateful_read` not present in peripheral (peripherals must implement one of these)");
@@ -743,19 +727,17 @@ impl State {
 
         for periph in self.peripherals.values() {
             unsafe {
-                if let Ok(stateful_reset) = periph
-                        .lib
-                        .library
-                        .get::<StatefulResetFn>(b"stateful_reset")
-                    {
+                if let Ok(stateful_reset) =
+                    periph.lib.library.get::<StatefulResetFn>(b"stateful_reset")
+                {
                     match periph.lib.state {
                         Some(state) => stateful_reset(state),
                         None => {
-                                eprintln!("PERIPHERAL ERROR: unable to call `stateful_reset` (state was not initialized)");
+                            eprintln!("PERIPHERAL ERROR: unable to call `stateful_reset` (state was not initialized)");
                         }
                     }
                 } else if let Ok(reset) = periph.lib.library.get::<ResetFn>(b"reset") {
-                        reset();
+                    reset();
                 }
             }
         }
@@ -789,23 +771,28 @@ impl State {
             }
             .unwrap_or(path);
 
-            let (state, err) = if let Ok(stateful_init) = lib.get::<StatefulInitFn>(b"stateful_init") {
-                let state = stateful_init(ports.len() as u8);
-                (Some(state), if state.is_null() {-1} else {0})
-            } else if let Ok(init) = lib.get::<InitFn>(b"init") {
-                let err = init(ports.len() as u8);
-                (None, err)
-            } else {
-                (None, 0)
-            };
+            let (state, err) =
+                if let Ok(stateful_init) = lib.get::<StatefulInitFn>(b"stateful_init") {
+                    let state = stateful_init(ports.len() as u8);
+                    (Some(state), if state.is_null() { -1 } else { 0 })
+                } else if let Ok(init) = lib.get::<InitFn>(b"init") {
+                    let err = init(ports.len() as u8);
+                    (None, err)
+                } else {
+                    (None, 0)
+                };
 
             if err != 0 {
-                let msg: Result<(Vec<u8>, c_int), libloading::Error> = lib.get::<LastErrLen>(b"last_error_length").map(|lel| {
-                    vec![0; lel() as usize]
-                }).and_then(|mut buf| {
-                    let written = lib.get::<GetLastErr>(b"get_last_error")?(buf.as_mut_ptr() as *mut c_char, buf.len() as c_int);
-                    Ok((buf, written))
-                });
+                let msg: Result<(Vec<u8>, c_int), libloading::Error> = lib
+                    .get::<LastErrLen>(b"last_error_length")
+                    .map(|lel| vec![0; lel() as usize])
+                    .and_then(|mut buf| {
+                        let written = lib.get::<GetLastErr>(b"get_last_error")?(
+                            buf.as_mut_ptr() as *mut c_char,
+                            buf.len() as c_int,
+                        );
+                        Ok((buf, written))
+                    });
 
                 match (msg, state.is_some()) {
                     (Ok((buffer, 1..)), st) => match CStr::from_bytes_with_nul_unchecked(&buffer).to_str() {
@@ -884,6 +871,15 @@ impl fmt::Display for State {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Hash)]
+enum ZeroCmd {
+    Dump,
+    Quit,
+    Step,
+    Reset,
+    Stop,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Hash)]
 enum SingleCmd {
     Get,
     Peek,
@@ -896,6 +892,13 @@ enum DoubleCmd {
     Poke,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Hash)]
+enum VariadicCmd {
+    Load,
+    Drop,
+    Help,
+}
+
 #[derive(Debug)]
 struct Lib {
     name: String,
@@ -906,10 +909,7 @@ struct Lib {
 impl Drop for Lib {
     fn drop(&mut self) {
         unsafe {
-            if let Ok(stateful_drop) = self
-                .library
-                .get::<StatefulDropFn>(b"stateful_drop")
-            {
+            if let Ok(stateful_drop) = self.library.get::<StatefulDropFn>(b"stateful_drop") {
                 match self.state {
                     Some(state) => stateful_drop(state),
                     None => {
@@ -923,7 +923,7 @@ impl Drop for Lib {
     }
 }
 
-// We can do this since the only time `state` is accessed is on drop.
+// We can do this since we are not using `state` across threads..
 unsafe impl Send for Lib {}
 unsafe impl Sync for Lib {}
 
@@ -949,14 +949,19 @@ pub async fn emulate(mut args: EmulatorArgs) -> Result<(), EmulatorError> {
     print!("> ");
     std::io::stdout()
         .flush()
-        .map_err(|err| EmulatorError::StdOut(err))?;
+        .map_err(|err| EmulatorError::Out(err))?;
     let stdin = spawn_stdin_channel();
 
     let mut prev = SystemTime::now();
 
     loop {
         match stdin.try_recv() {
-            Ok(s) => handle_input(s).await?,
+            Ok(s) => {
+                handle_input(s, &mut std::io::stdout(), &mut std::io::stderr()).await?;
+                std::io::stdout()
+                    .flush()
+                    .map_err(|err| EmulatorError::Out(err))?;
+            }
             Err(TryRecvError::Closed) => return Err(EmulatorError::StdIn),
             Err(TryRecvError::Empty) => {}
         }
@@ -974,7 +979,7 @@ pub async fn emulate(mut args: EmulatorArgs) -> Result<(), EmulatorError> {
         let mut state = STATE.get().ok_or(EmulatorError::OnceEmpty)?.write().await;
 
         let tick = match state.speed {
-            Some(speed) =>  prev.elapsed()? >= speed.0,
+            Some(speed) => prev.elapsed()? >= speed.0,
             None => false,
         };
 
@@ -993,149 +998,36 @@ pub async fn emulate(mut args: EmulatorArgs) -> Result<(), EmulatorError> {
     Ok(())
 }
 
-async fn handle_input(input: String) -> Result<(), EmulatorError> {
-    match input.trim().split_once(' ') {
-        Some((cmd, args)) => match cmd {
-            "GET" => single_arg(SingleCmd::Get, args).await?,
-            "SET" => double_arg(DoubleCmd::Set, args).await?,
-            "PEEK" => single_arg(SingleCmd::Peek, args).await?,
-            "POKE" => double_arg(DoubleCmd::Poke, args).await?,
-            "DROP" => {
-                let ports: Option<Vec<u8>> = args.trim().split(' ').filter(|arg| arg.trim().len() > 0).map(|addr| {
-                    match parse_u16(addr) {
-                        Ok(p) => {
-                            if p < 0xFFC0 {
-                                eprintln!("INVALID ARGUMENT: memory mapped I/O can only be mapped to addresses between 0xFFC0-0xFFFF");
-                                None
-                            } else if p == 0xFFFF {
-                                eprintln!("INVALID ARGUMENT: the status register cannot be dropped");
-                                None
-                            } else {
-                                Some((p - 0xFFC0) as u8)
-                            }
-                        },
-                        Err(_) => {
-                            eprintln!("INVALID ARGUMENT: unable to parse address {addr}");
-                            None
-                        }
-                    }
-                }).collect();
+async fn handle_input(
+    input: String,
+    mut writer: impl std::io::Write,
+    mut ewriter: impl std::io::Write,
+) -> Result<(), EmulatorError> {
+    let (cmd, arg_string) = input.trim().split_once(' ').unwrap_or((&input.trim(), ""));
+    let args: Vec<&str> = arg_string
+        .split(' ')
+        .filter(|arg| arg.trim().len() > 0)
+        .collect();
+    match cmd {
+        "GET" => single_arg(SingleCmd::Get, &args, &mut writer, ewriter).await?,
+        "SET" => double_arg(DoubleCmd::Set, &args, &mut writer, ewriter).await?,
+        "PEEK" => single_arg(SingleCmd::Peek, &args, &mut writer, ewriter).await?,
+        "POKE" => double_arg(DoubleCmd::Poke, &args, &mut writer, ewriter).await?,
+        "DROP" => variadic_arg(VariadicCmd::Drop, &args, &mut writer, ewriter).await?,
+        "RUN" => single_arg(SingleCmd::Run, &args, &mut writer, ewriter).await?,
+        "LOAD" => variadic_arg(VariadicCmd::Load, &args, &mut writer, ewriter).await?,
+        "DUMP" => zero_arg(ZeroCmd::Dump, &args, &mut writer, ewriter).await?,
+        "QUIT" => zero_arg(ZeroCmd::Quit, &args, &mut writer, ewriter).await?,
+        "STEP" => zero_arg(ZeroCmd::Step, &args, &mut writer, ewriter).await?,
+        "RESET" => zero_arg(ZeroCmd::Reset, &args, &mut writer, ewriter).await?,
+        "STOP" => zero_arg(ZeroCmd::Stop, &args, &mut writer, ewriter).await?,
+        "HELP" => variadic_arg(VariadicCmd::Help, &args, &mut writer, &mut ewriter).await?,
+        "" => {}
+        cmd => writeln!(ewriter, "UNRECOGNIZED COMMAND: {cmd}")
+            .map_err(|err| EmulatorError::Out(err))?,
+    }
 
-                let mut state = STATE.get().ok_or(EmulatorError::OnceEmpty)?.write().await;
-
-                if let Some(ports) = ports {
-                    for port in ports {
-                        if let None = state.peripherals.remove(&port) {
-                            println!(
-                                "WARNING: no peripheral found at address {:#06X}",
-                                (port as u16) + 0xFFBF
-                            );
-                        }
-                    }
-                }
-            }
-            "RUN" => single_arg(SingleCmd::Run, args).await?,
-            "LOAD" => {
-                match args.trim().split_once(' ') {
-                    Some((pat, rest)) => {
-                        let path = parse_path(pat);
-                        let ports: Option<Vec<u8>> = rest.trim().split(' ').filter(|arg| arg.trim().len() > 0).map(|addr| {
-                            match parse_u16(addr) {
-                                Ok(p) => {
-                                    if p < 0xFFC0 {
-                                        eprintln!("INVALID ARGUMENT: memory mapped I/O can only be mapped to addresses between 0xFFC0-0xFFFF");
-                                        None
-                                    } else if p == 0xFFFF {
-                                        eprintln!("INVALID ARGUMENT: the status register cannot be overwritten");
-                                        None
-                                    } else {
-                                        Some((p - 0xFFC0) as u8)
-                                    }
-                                },
-                                Err(_) => {
-                                    eprintln!("INVALID ARGUMENT: unable to parse address {addr}");
-                                    None
-                                }
-                            }
-                        }).collect();
-
-                        if let Some(ports) = ports {
-                            STATE
-                                .get()
-                                .ok_or(EmulatorError::OnceEmpty)?
-                                .write()
-                                .await
-                                .load(path, ports);
-                        }
-                    }
-                    None => eprintln!("INVALID ARGUMENT: expected at least 2 arguments, found 1"),
-                };
-            }
-            _ => eprintln!("UNRECOGNIZED COMMAND: {cmd} "),
-        },
-        None => match input.trim() {
-            "DUMP" => print!(
-                "{}",
-                STATE.get().ok_or(EmulatorError::OnceEmpty)?.read().await
-            ),
-            "QUIT" => {
-                STATE
-                    .get()
-                    .ok_or(EmulatorError::OnceEmpty)?
-                    .write()
-                    .await
-                    .quit = true;
-                return Ok(());
-            }
-            "STEP" => {
-                if STATE
-                    .get()
-                    .ok_or(EmulatorError::OnceEmpty)?
-                    .read()
-                    .await
-                    .speed
-                    .is_none()
-                {
-                    let halted = STATE
-                        .get()
-                        .ok_or(EmulatorError::OnceEmpty)?
-                        .write()
-                        .await
-                        .tick();
-
-                    if halted {
-                        eprintln!("INVALID COMMAND: CPU is halted, the clock cannot be stepped")
-                    }
-                } else {
-                    eprintln!("INVALID COMMAND: STEP can only be used if the CPU is stopped")
-                }
-            },
-            "RESET" => {
-                STATE
-                    .get()
-                    .ok_or(EmulatorError::OnceEmpty)?
-                    .write()
-                    .await
-                    .reset()
-            }
-            "HELP" => help(),
-            "STOP" => {
-                STATE
-                    .get()
-                    .ok_or(EmulatorError::OnceEmpty)?
-                    .write()
-                    .await
-                    .speed = None
-            }
-            "" => {}
-            cmd => eprintln!("UNRECOGNIZED COMMAND: {cmd}"),
-        },
-    };
-
-    print!("> ");
-    std::io::stdout()
-        .flush()
-        .map_err(|err| EmulatorError::StdOut(err))?;
+    write!(writer, "> ").map_err(|err| EmulatorError::Out(err))?;
 
     Ok(())
 }
@@ -1148,9 +1040,7 @@ fn help() {
         PEEK <addr>         : Gets the value at the memory address `addr`\n\
         POKE <addr>, <val>  : Sets the value at the memory address `addr` to `val`\n\
         RUN <speed>         : Starts running the CPU at the specified `speed` (in hertz)\
-\n                      If `speed` is zero, the emulator will run as fast as possible.\n\
-        LOAD <path>, <port> : Loads the library at the given path as a peripheral.\
-\n                      Read more about peripherals and their requirements in the README.
+        LOAD <path>, <port> : Loads the library at the given path as a peripheral.\n\
         DROP <port>         : Disconnects the peripheral on the given port, unloading the module.\n\
         DUMP                : Dumps the current machine state\n\
         STEP                : Pulses the clock a single time (only available if the CPU is stopped)\n\
@@ -1162,12 +1052,110 @@ fn help() {
     );
 }
 
-async fn single_arg(cmd: SingleCmd, arg: &str) -> Result<(), EmulatorError> {
+async fn zero_arg(
+    cmd: ZeroCmd,
+    args: &[&str],
+    mut writer: impl std::io::Write,
+    mut ewriter: impl std::io::Write,
+) -> Result<(), EmulatorError> {
+    let count = args.into_iter().filter(|arg| arg.trim().len() > 0).count();
+    if count != 0 {
+        writeln!(
+            ewriter,
+            "ARGUMENT ERROR: expected no arguments, found {count}"
+        )
+        .map_err(|err| EmulatorError::Out(err))?;
+        return Ok(());
+    }
+
+    match cmd {
+        ZeroCmd::Dump => write!(
+            writer,
+            "{}",
+            STATE.get().ok_or(EmulatorError::OnceEmpty)?.read().await
+        )
+        .map_err(|err| EmulatorError::Out(err))?,
+        ZeroCmd::Quit => {
+            STATE
+                .get()
+                .ok_or(EmulatorError::OnceEmpty)?
+                .write()
+                .await
+                .quit = true;
+            return Ok(());
+        }
+        ZeroCmd::Step => {
+            if STATE
+                .get()
+                .ok_or(EmulatorError::OnceEmpty)?
+                .read()
+                .await
+                .speed
+                .is_none()
+            {
+                let halted = STATE
+                    .get()
+                    .ok_or(EmulatorError::OnceEmpty)?
+                    .write()
+                    .await
+                    .tick();
+
+                if halted {
+                    writeln!(
+                        ewriter,
+                        "INVALID COMMAND: CPU is halted, the clock cannot be stepped"
+                    )
+                    .map_err(|err| EmulatorError::Out(err))?;
+                }
+            } else {
+                writeln!(
+                    ewriter,
+                    "INVALID COMMAND: STEP can only be used if the CPU is stopped"
+                )
+                .map_err(|err| EmulatorError::Out(err))?;
+            }
+        }
+        ZeroCmd::Reset => STATE
+            .get()
+            .ok_or(EmulatorError::OnceEmpty)?
+            .write()
+            .await
+            .reset(),
+        ZeroCmd::Stop => {
+            STATE
+                .get()
+                .ok_or(EmulatorError::OnceEmpty)?
+                .write()
+                .await
+                .speed = None
+        }
+    }
+
+    Ok(())
+}
+
+async fn single_arg(
+    cmd: SingleCmd,
+    args: &[&str],
+    mut writer: impl std::io::Write,
+    mut ewriter: impl std::io::Write,
+) -> Result<(), EmulatorError> {
+    let count = args.into_iter().filter(|arg| arg.trim().len() > 0).count();
+    if count != 1 {
+        writeln!(
+            ewriter,
+            "ARGUMENT ERROR: expected `1` argument, fount `{count}`"
+        )
+        .map_err(|err| EmulatorError::Out(err))?;
+        return Ok(());
+    }
+    let arg = args[0].trim();
+
     match cmd {
         SingleCmd::Get => {
-            let reg = match parse_u8(arg.trim()) {
+            let reg = match parse_u8(arg) {
                 Ok(reg) => reg,
-                Err(_) => match arg.trim() {
+                Err(_) => match arg {
                     "A" => 0,
                     "B" => 1,
                     "C" => 2,
@@ -1177,16 +1165,19 @@ async fn single_arg(cmd: SingleCmd, arg: &str) -> Result<(), EmulatorError> {
                     "L" => 6,
                     "F" => 7,
                     _ => {
-                        eprintln!("INVALID ARGUMENT: unable to parse register");
+                        writeln!(ewriter, "INVALID ARGUMENT: unable to parse register")
+                            .map_err(|err| EmulatorError::Out(err))?;
                         return Ok(());
                     }
                 },
             };
             if reg >= 8 {
-                eprintln!("INVALID ARGUMENT: register out of range");
+                writeln!(ewriter, "INVALID ARGUMENT: register out of range")
+                    .map_err(|err| EmulatorError::Out(err))?;
                 return Ok(());
             }
-            println!(
+            writeln!(
+                writer,
                 "REGISTER {reg}: {:#04X}",
                 STATE
                     .get()
@@ -1196,12 +1187,14 @@ async fn single_arg(cmd: SingleCmd, arg: &str) -> Result<(), EmulatorError> {
                     .bank
                     .get_reg(reg)
             )
+            .map_err(|err| EmulatorError::Out(err))?
         }
         SingleCmd::Peek => {
-            let addr = match parse_u16(arg.trim()) {
+            let addr = match parse_u16(arg) {
                 Ok(addr) => addr,
                 Err(_) => {
-                    eprintln!("INVALID ARGUMENT: unable to parse address");
+                    writeln!(ewriter, "INVALID ARGUMENT: unable to parse address")
+                        .map_err(|err| EmulatorError::Out(err))?;
                     return Ok(());
                 }
             };
@@ -1225,27 +1218,20 @@ async fn single_arg(cmd: SingleCmd, arg: &str) -> Result<(), EmulatorError> {
                         .get(&((addr - 0xFFC0) as u8))
                     {
                         Some(periph) => unsafe {
-                            if let Ok(stateful_read) = periph
-                                .lib
-                                .library
-                                .get::<StatefulReadFn>(b"stateful_read")
+                            if let Ok(stateful_read) =
+                                periph.lib.library.get::<StatefulReadFn>(b"stateful_read")
                             {
                                 match periph.lib.state {
                                     Some(state) => stateful_read(state, periph.n),
                                     None => {
-                                        eprintln!("PERIPHERAL ERROR: unable to call `stateful_read` (state was not initialized)");
+                                        writeln!(ewriter, "PERIPHERAL ERROR: unable to call `stateful_read` (state was not initialized)").map_err(|err| EmulatorError::Out(err))?;
                                         return Ok(());
                                     }
                                 }
-                            } else if let Ok(read) =
-                                periph
-                                    .lib
-                                    .library
-                                    .get::<ReadFn>(b"read")
-                            {
+                            } else if let Ok(read) = periph.lib.library.get::<ReadFn>(b"read") {
                                 read(periph.n)
                             } else {
-                                eprintln!("PERIPHERAL ERROR: `read` and `stateful_read` not present in peripheral (peripherals must implement one of these)");
+                                writeln!(ewriter, "PERIPHERAL ERROR: `read` and `stateful_read` not present in peripheral (peripherals must implement one of these)").map_err(|err| EmulatorError::Out(err))?;
                                 return Ok(());
                             }
                         },
@@ -1264,10 +1250,11 @@ async fn single_arg(cmd: SingleCmd, arg: &str) -> Result<(), EmulatorError> {
             println!("{addr:#06X}: {data:#04X}");
         }
         SingleCmd::Run => {
-            let speed = match parse_u32(arg.trim()) {
+            let speed = match parse_u32(arg) {
                 Ok(speed) => speed,
                 Err(_) => {
-                    eprintln!("INVALID ARGUMENT: unable to parse speed");
+                    writeln!(ewriter, "INVALID ARGUMENT: unable to parse speed")
+                        .map_err(|err| EmulatorError::Out(err))?;
                     return Ok(());
                 }
             };
@@ -1290,14 +1277,23 @@ async fn single_arg(cmd: SingleCmd, arg: &str) -> Result<(), EmulatorError> {
     Ok(())
 }
 
-async fn double_arg(cmd: DoubleCmd, args: &str) -> Result<(), EmulatorError> {
-    let (arg1, arg2) = match args.trim().split_once(' ') {
-        Some(args) => args,
-        None => {
-            eprintln!("INVALID ARGUMENT: expected two arguments, found one");
-            return Ok(());
-        }
-    };
+async fn double_arg(
+    cmd: DoubleCmd,
+    args: &[&str],
+    mut _writer: impl std::io::Write,
+    mut ewriter: impl std::io::Write,
+) -> Result<(), EmulatorError> {
+    let count = args.into_iter().filter(|arg| arg.trim().len() > 0).count();
+    if count != 1 {
+        writeln!(
+            ewriter,
+            "ARGUMENT ERROR: expected `2` arguments, fount `{count}`"
+        )
+        .map_err(|err| EmulatorError::Out(err))?;
+        return Ok(());
+    }
+    let arg1 = args[0].trim();
+    let arg2 = args[1].trim();
 
     match cmd {
         DoubleCmd::Set => {
@@ -1313,20 +1309,23 @@ async fn double_arg(cmd: DoubleCmd, args: &str) -> Result<(), EmulatorError> {
                     "L" => 6,
                     "F" => 7,
                     _ => {
-                        eprintln!("INVALID ARGUMENT: unable to parse register");
+                        writeln!(ewriter, "INVALID ARGUMENT: unable to parse register")
+                            .map_err(|err| EmulatorError::Out(err))?;
                         return Ok(());
                     }
                 },
             };
             if reg >= 8 {
-                eprintln!("INVALID ARGUMENT: register out of range");
+                writeln!(ewriter, "INVALID ARGUMENT: register out of range")
+                    .map_err(|err| EmulatorError::Out(err))?;
                 return Ok(());
             }
 
             let value = match parse_u8(arg2.trim()) {
                 Ok(val) => val,
                 Err(_) => {
-                    eprintln!("INVALID ARGUMENT: unable to parse value");
+                    writeln!(ewriter, "INVALID ARGUMENT: unable to parse value")
+                        .map_err(|err| EmulatorError::Out(err))?;
                     return Ok(());
                 }
             };
@@ -1343,7 +1342,8 @@ async fn double_arg(cmd: DoubleCmd, args: &str) -> Result<(), EmulatorError> {
             let addr = match parse_u16(arg1.trim()) {
                 Ok(addr) => addr,
                 Err(_) => {
-                    eprintln!("INVALID ARGUMENT: unable to parse address");
+                    writeln!(ewriter, "INVALID ARGUMENT: unable to parse address")
+                        .map_err(|err| EmulatorError::Out(err))?;
                     return Ok(());
                 }
             };
@@ -1351,7 +1351,8 @@ async fn double_arg(cmd: DoubleCmd, args: &str) -> Result<(), EmulatorError> {
             let value = match parse_u8(arg2.trim()) {
                 Ok(val) => val,
                 Err(_) => {
-                    eprintln!("INVALID ARGUMENT: unable to parse value");
+                    writeln!(ewriter, "INVALID ARGUMENT: unable to parse value")
+                        .map_err(|err| EmulatorError::Out(err))?;
                     return Ok(());
                 }
             };
@@ -1375,26 +1376,20 @@ async fn double_arg(cmd: DoubleCmd, args: &str) -> Result<(), EmulatorError> {
                         .get(&((addr - 0xFFC0) as u8))
                     {
                         Some(periph) => unsafe {
-                            if let Ok(stateful_write) = periph
-                                .lib
-                                .library
-                                .get::<StatefulWriteFn>(b"stateful_write")
+                            if let Ok(stateful_write) =
+                                periph.lib.library.get::<StatefulWriteFn>(b"stateful_write")
                             {
                                 match periph.lib.state {
                                     Some(state) => stateful_write(state, periph.n, value),
                                     None => {
-                                        eprintln!("PERIPHERAL ERROR: unable to call `stateful_read` (state was not initialized)");
+                                        writeln!(ewriter, "PERIPHERAL ERROR: unable to call `stateful_read` (state was not initialized)").map_err(|err| EmulatorError::Out(err))?;
                                         return Ok(());
                                     }
                                 };
-                            } else if let Ok(write) = periph
-                                .lib
-                                .library
-                                .get::<WriteFn>(b"write")
-                            {
+                            } else if let Ok(write) = periph.lib.library.get::<WriteFn>(b"write") {
                                 write(periph.n, value);
                             } else {
-                                eprintln!("PERIPHERAL ERROR: `write` and `stateful_write` not present in peripheral (peripherals must implement one of these)");
+                                writeln!(ewriter, "PERIPHERAL ERROR: `write` and `stateful_write` not present in peripheral (peripherals must implement one of these)").map_err(|err| EmulatorError::Out(err))?;
                                 return Ok(());
                             }
                         },
@@ -1410,6 +1405,144 @@ async fn double_arg(cmd: DoubleCmd, args: &str) -> Result<(), EmulatorError> {
                         .sreg = SReg::from_bits_retain(value)
                 }
             };
+        }
+    }
+
+    Ok(())
+}
+
+async fn variadic_arg(
+    cmd: VariadicCmd,
+    args: &[&str],
+    mut writer: impl std::io::Write,
+    mut ewriter: impl std::io::Write,
+) -> Result<(), EmulatorError> {
+    match cmd {
+        VariadicCmd::Load => {
+            if args.is_empty() {
+                writeln!(
+                    ewriter,
+                    "ARGUMENT ERROR: expected at least `1` argument, found `0`"
+                )
+                .map_err(|err| EmulatorError::Out(err))?;
+                return Ok(());
+            } else if args.len() == 1 {
+                writeln!(
+                    writer,
+                    "WARNING: no ports provided. {} will not be initialized",
+                    args[0]
+                )
+                .map_err(|err| EmulatorError::Out(err))?;
+                return Ok(());
+            }
+            let (path_slice, args_slice) = args.split_at(1);
+
+            let path = parse_path(path_slice[0]);
+
+            let mut ports = Vec::new();
+            for addr in args_slice.into_iter().filter(|arg| arg.trim().len() > 0) {
+                match parse_u16(addr) {
+                    Ok(p) => {
+                        if p < 0xFFC0 {
+                            writeln!(ewriter, "INVALID ARGUMENT: memory mapped I/O can only be mapped to addresses between 0xFFC0-0xFFFF").map_err(|err| EmulatorError::Out(err))?;
+                            return Ok(());
+                        } else if p == 0xFFFF {
+                            writeln!(
+                                ewriter,
+                                "INVALID ARGUMENT: the status register cannot be overwritten"
+                            )
+                            .map_err(|err| EmulatorError::Out(err))?;
+                            return Ok(());
+                        } else {
+                            ports.push((p - 0xFFC0) as u8)
+                        }
+                    }
+                    Err(_) => {
+                        writeln!(ewriter, "INVALID ARGUMENT: unable to parse address {addr}")
+                            .map_err(|err| EmulatorError::Out(err))?;
+                        return Ok(());
+                    }
+                }
+            }
+
+            STATE
+                .get()
+                .ok_or(EmulatorError::OnceEmpty)?
+                .write()
+                .await
+                .load(path, ports);
+        }
+        VariadicCmd::Drop => {
+            if args.is_empty() {
+                writeln!(writer, "INFO: dropping all peripherals")
+                    .map_err(|err| EmulatorError::Out(err))?;
+                STATE
+                    .get()
+                    .ok_or(EmulatorError::OnceEmpty)?
+                    .write()
+                    .await
+                    .peripherals
+                    .clear();
+                return Ok(());
+            }
+
+            let mut ports = Vec::new();
+            for addr in args.into_iter().filter(|arg| arg.trim().len() > 0) {
+                match parse_u16(addr) {
+                    Ok(p) => {
+                        if p < 0xFFC0 {
+                            writeln!(ewriter, "INVALID ARGUMENT: memory mapped I/O can only be mapped to addresses between 0xFFC0-0xFFFF").map_err(|err| EmulatorError::Out(err))?;
+                            return Ok(());
+                        } else if p == 0xFFFF {
+                            writeln!(
+                                ewriter,
+                                "INVALID ARGUMENT: the status register cannot be overwritten"
+                            )
+                            .map_err(|err| EmulatorError::Out(err))?;
+                            return Ok(());
+                        } else {
+                            ports.push((p - 0xFFC0) as u8)
+                        }
+                    }
+                    Err(_) => {
+                        writeln!(ewriter, "INVALID ARGUMENT: unable to parse address {addr}")
+                            .map_err(|err| EmulatorError::Out(err))?;
+                        return Ok(());
+                    }
+                }
+            }
+
+            let mut state = STATE.get().ok_or(EmulatorError::OnceEmpty)?.write().await;
+
+            for port in ports {
+                if let None = state.peripherals.remove(&port) {
+                    writeln!(
+                        writer,
+                        "WARNING: no peripheral found at address {:#06X}",
+                        (port as u16) + 0xFFBF
+                    )
+                    .map_err(|err| EmulatorError::Out(err))?;
+                }
+            }
+        }
+        VariadicCmd::Help => {
+            if args.is_empty() {
+                help();
+            } else {
+                for arg in args {
+                    let command = match Command::from_str(arg) {
+                        Ok(c) => c,
+                        Err(_) => {
+                            writeln!(ewriter, "ARGUMENT ERROR: unrecognized command `{arg}`")
+                                .map_err(|err| EmulatorError::Out(err))?;
+                            return Ok(());
+                        }
+                    };
+
+                    write!(writer, "\n{}\n", command.help())
+                        .map_err(|err| EmulatorError::Out(err))?;
+                }
+            }
         }
     }
 
