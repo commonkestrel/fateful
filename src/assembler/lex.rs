@@ -1,14 +1,13 @@
 use std::fmt;
 use std::fs::File;
-use std::io::{BufRead, BufReader, ErrorKind, Read};
-use std::mem;
+use std::io::{BufRead, BufReader, ErrorKind};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
 
 use super::ascii::{unescape_str, AsciiStr, UnescapeError};
-use super::diagnostic::{Diagnostic, OptionalScream, ResultScream};
+use super::diagnostic::Diagnostic;
 use super::Errors;
 use crate::error;
 use logos::{Lexer, Logos};
@@ -19,7 +18,25 @@ pub type LexResult = std::result::Result<TokenStream, Errors>;
 #[derive(Debug, PartialEq, Clone)]
 pub struct Token {
     pub inner: TokenInner,
-    pub span: Span,
+    pub span: Arc<Span>,
+}
+
+impl Token {
+    fn description(&self) -> &'static str {
+        use TokenInner as TI;
+        match self.inner {
+            TI::Address(_) => "address",
+            TI::Char(_) => "character",
+            TI::Delimeter(delim) => delim.description(),
+            TI::Doc(_) => "doc string",
+            TI::Ident(ident) => ident.description(),
+            TI::Immediate(_) => "immediate",
+            TI::String(_) => "string",
+            TI::NewLine => "newline",
+            TI::Punctuation(punct) => punct.description(),
+            TI::Location => "location",
+        }
+    }
 }
 
 impl FromStr for Token {
@@ -31,11 +48,11 @@ impl FromStr for Token {
         let (token, span) = lex
             .next()
             .ok_or_else(|| Diagnostic::error("No tokens found in string"))?;
-        let span = Span {
+        let span = Arc::new(Span {
             line: 0,
             range: span,
             source: Source::String(Arc::new(s.to_owned())),
-        };
+        });
         match token {
             Ok(inner) => Ok(Token { inner, span }),
             Err(mut err) => {
@@ -76,21 +93,15 @@ pub fn lex<P: AsRef<Path>>(path: P) -> LexResult {
                         {
                             let spanned =
                                 span.start + prev_lines.len()..span.end + prev_lines.len();
+                            let span = Arc::new(Span {
+                                line: line_num,
+                                range: spanned,
+                                source: Source::File(source.clone()),
+                            });
                             match token {
-                                Ok(tok) => tokens.push(Token {
-                                    inner: tok,
-                                    span: Span {
-                                        line: line_num,
-                                        range: spanned,
-                                        source: Source::File(source.clone()),
-                                    },
-                                }),
+                                Ok(tok) => tokens.push(Token { inner: tok, span }),
                                 Err(mut err) => {
-                                    err.set_span(Span {
-                                        line: line_num,
-                                        range: spanned,
-                                        source: Source::File(source.clone()),
-                                    });
+                                    err.set_span(span);
                                     errs.push(err);
                                 }
                             }
@@ -98,11 +109,11 @@ pub fn lex<P: AsRef<Path>>(path: P) -> LexResult {
 
                         tokens.push(Token {
                             inner: TokenInner::NewLine,
-                            span: Span {
+                            span: Arc::new(Span {
                                 line: line_num,
                                 range: 0..0,
                                 source: Source::File(source.clone()),
-                            },
+                            }),
                         })
                     }
                     Err(err) => {
@@ -158,21 +169,15 @@ where
 
         for (token, span) in TokenInner::lexer(&(prev_lines.clone() + &line)).spanned() {
             let spanned = span.start + prev_lines.len()..span.end + prev_lines.len();
+            let span = Arc::new(Span {
+                line: line_num,
+                range: spanned,
+                source: Source::String(source.clone()),
+            });
             match token {
-                Ok(tok) => tokens.push(Token {
-                    inner: tok,
-                    span: Span {
-                        line: line_num,
-                        range: spanned,
-                        source: Source::String(source.clone()),
-                    },
-                }),
+                Ok(tok) => tokens.push(Token { inner: tok, span }),
                 Err(mut err) => {
-                    err.set_span(Span {
-                        line: line_num,
-                        range: spanned,
-                        source: Source::String(source.clone()),
-                    });
+                    err.set_span(span);
                     errs.push(err);
                 }
             }
@@ -206,11 +211,12 @@ pub enum TokenInner {
     #[regex(r"'\\x[[:xdigit:]]{1,2}'", TokenInner::char)]
     Char(u8),
 
-    #[regex(r"\[0b[01][_01]*\]", TokenInner::addr_bin)]
-    #[regex(r"\[0o[0-7][_0-7]*\]", TokenInner::addr_oct)]
-    #[regex(r"\[[0-9][_0-9]*\]", TokenInner::addr_dec)]
-    #[regex(r"\[0x[0-9a-fA-F][_0-9a-fA-F]*\]", TokenInner::addr_hex)]
-    Address(u16),
+    #[regex(r"\[0b[01][_01]*\]", Address::addr_bin)]
+    #[regex(r"\[0o[0-7][_0-7]*\]", Address::addr_oct)]
+    #[regex(r"\[[0-9][_0-9]*\]", Address::addr_dec)]
+    #[regex(r"\[0x[0-9a-fA-F][_0-9a-fA-F]*\]", Address::addr_hex)]
+    #[regex(r"\[[._a-zA-Z][_a-zA-Z0-9]*\]", Address::label)]
+    Address(Address),
 
     #[regex(r"[._a-zA-Z][_a-zA-Z0-9]*", Ident::any)]
     #[regex(r"@[_a-zA-Z][_a-zA-Z0-9]*", Ident::pre_proc)]
@@ -359,59 +365,6 @@ impl TokenInner {
         Some(Box::new(PathBuf::try_from(slice).ok()?))
     }
 
-    fn addr_bin(lex: &mut Lexer<TokenInner>) -> Result<u16, Diagnostic> {
-        let slice = lex
-            .slice()
-            .strip_prefix("[0b")
-            .ok_or_else(|| Diagnostic::error("binary address does not start with `[0b`"))?
-            .strip_suffix("]")
-            .ok_or_else(|| Diagnostic::error("binary address does not end with `]`"))?
-            .replace("_", "");
-
-        u16::from_str_radix(&slice, 2).map_err(|err| {
-            Diagnostic::error(format!("address must be a valid 16-bit integer: {err}"))
-        })
-    }
-
-    fn addr_oct(lex: &mut Lexer<TokenInner>) -> Result<u16, Diagnostic> {
-        let slice = lex
-            .slice()
-            .strip_prefix("[0o")
-            .ok_or_else(|| Diagnostic::error("binary address does not start with `[0o`"))?
-            .strip_suffix("]")
-            .ok_or_else(|| Diagnostic::error("binary address does not end with `]`"))?;
-
-        u16::from_str_radix(slice, 8).map_err(|err| {
-            Diagnostic::error(format!("address must be a valid 16-bit integer: {err}"))
-        })
-    }
-
-    fn addr_dec(lex: &mut Lexer<TokenInner>) -> Result<u16, Diagnostic> {
-        let slice = lex
-            .slice()
-            .strip_prefix("[")
-            .ok_or_else(|| Diagnostic::error("binary address does not start with `[`"))?
-            .strip_suffix("]")
-            .ok_or_else(|| Diagnostic::error("binary address does not end with `]`"))?;
-
-        u16::from_str_radix(slice, 10).map_err(|err| {
-            Diagnostic::error(format!("address must be a valid 16-bit integer: {err}"))
-        })
-    }
-
-    fn addr_hex(lex: &mut Lexer<TokenInner>) -> Result<u16, Diagnostic> {
-        let slice = lex
-            .slice()
-            .strip_prefix("[0x")
-            .ok_or_else(|| Diagnostic::error("binary address does not start with `[0x`"))?
-            .strip_suffix("]")
-            .ok_or_else(|| Diagnostic::error("binary address does not end with `]`"))?;
-
-        u16::from_str_radix(slice, 16).map_err(|err| {
-            Diagnostic::error(format!("address must be a valid 16-bit integer: {err}"))
-        })
-    }
-
     fn doc(lex: &mut Lexer<TokenInner>) -> Result<String, Diagnostic> {
         Ok(lex
             .slice()
@@ -419,6 +372,60 @@ impl TokenInner {
             .ok_or_else(|| Diagnostic::error("doc comment does not start with `///`"))?
             .trim()
             .to_owned())
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum Address {
+    Immediate(u16),
+    Label(String),
+}
+
+impl Address {
+    fn trim(lex: &mut Lexer<TokenInner>) -> Result<String, Diagnostic> {
+        Ok(lex
+            .slice()
+            .strip_prefix("[0b")
+            .ok_or_else(|| Diagnostic::error("binary address does not start with `[0b`"))?
+            .strip_suffix("]")
+            .ok_or_else(|| Diagnostic::error("binary address does not end with `]`"))?
+            .replace("_", ""))
+    }
+
+    fn addr_bin(lex: &mut Lexer<TokenInner>) -> Result<Address, Diagnostic> {
+        let slice = Address::trim(lex)?;
+
+        Ok(Address::Immediate(u16::from_str_radix(&slice, 2).map_err(|err| {
+            Diagnostic::error(format!("address must be a valid 16-bit integer: {err}"))
+        })?))
+    }
+
+    fn addr_oct(lex: &mut Lexer<TokenInner>) -> Result<Address, Diagnostic> {
+        let slice = Address::trim(lex)?;
+
+        Ok(Address::Immediate(u16::from_str_radix(&slice, 8).map_err(|err| {
+            Diagnostic::error(format!("address must be a valid 16-bit integer: {err}"))
+        })?))
+    }
+
+    fn addr_dec(lex: &mut Lexer<TokenInner>) -> Result<Address, Diagnostic> {
+        let slice = Address::trim(lex)?;
+
+        Ok(Address::Immediate(u16::from_str_radix(&slice, 10).map_err(|err| {
+            Diagnostic::error(format!("address must be a valid 16-bit integer: {err}"))
+        })?))
+    }
+
+    fn addr_hex(lex: &mut Lexer<TokenInner>) -> Result<Address, Diagnostic> {
+        let slice = Address::trim(lex)?;
+
+        Ok(Address::Immediate(u16::from_str_radix(&slice, 16).map_err(|err| {
+            Diagnostic::error(format!("address must be a valid 16-bit integer: {err}"))
+        })?))
+    }
+
+    fn label(lex: &mut Lexer<TokenInner>) -> Result<Address, Diagnostic> {
+        Ok(Address::Label(Address::trim(lex)?))
     }
 }
 
@@ -434,6 +441,18 @@ pub enum Ident {
 }
 
 impl Ident {
+    fn description(&self) -> &'static str {
+        match self {
+            Ident::Register(_) => "register",
+            Ident::PreProc(pp) => pp.description(),
+            Ident::Instruction(instr) => instr.description(),
+            Ident::Variable(_) => "variable",
+            Ident::MacroVariable(_) => "macro variable",
+            Ident::Ty(_) => "type",
+            Ident::Ident(_) => "identifier",
+        }
+    }
+
     fn variable(lex: &mut Lexer<TokenInner>) -> Result<Ident, Diagnostic> {
         let slice = lex
             .slice()
@@ -528,6 +547,31 @@ pub enum PreProc {
     Var,
 }
 
+impl PreProc {
+    fn description(&self) -> &'static str {
+        use PreProc as PP;
+        match self {
+            PP::Include => "`@include`",
+            PP::Macro => "`@macro`",
+            PP::Define => "`@define`",
+            PP::UnDef => "`@undef`",
+            PP::IfDef => "`@ifdef`",
+            PP::IfNDef => "`@ifndef`",
+            PP::If => "`@if`",
+            PP::Else => "`@else`",
+            PP::ElIf => "`@elif`",
+            PP::EndIf => "`@endif`",
+            PP::Org => "`@org`",
+            PP::Cseg => "`@cseg`",
+            PP::Dseg => "`@dseg`",
+            PP::Byte => "`@byte`",
+            PP::Double => "`@double`",
+            PP::Quad => "`@quad`",
+            PP::Var => "`@var`",
+        }
+    }
+}
+
 impl FromStr for PreProc {
     type Err = Diagnostic;
 
@@ -539,23 +583,23 @@ impl FromStr for PreProc {
         use PreProc as PP;
 
         match argument {
-            "INCLUDE" => Ok(PP::Include),
-            "MACRO" => Ok(PP::Macro),
-            "DEFINE" => Ok(PP::Define),
-            "UNDEF" => Ok(PP::UnDef),
-            "IFDEF" => Ok(PP::IfDef),
-            "IFNDEF" => Ok(PP::IfNDef),
-            "IF" => Ok(PP::If),
-            "ELSE" => Ok(PP::Else),
-            "ELIF" => Ok(PP::ElIf),
-            "ENDIF" => Ok(PP::EndIf),
-            "ORG" => Ok(PP::Org),
-            "CSEG" => Ok(PP::Cseg),
-            "DSEG" => Ok(PP::Dseg),
-            "BYTE" => Ok(PP::Byte),
-            "DOUBLE" => Ok(PP::Double),
-            "QUAD" => Ok(PP::Quad),
-            "VAR" => Ok(PP::Var),
+            "include" => Ok(PP::Include),
+            "macro" => Ok(PP::Macro),
+            "define" => Ok(PP::Define),
+            "undef" => Ok(PP::UnDef),
+            "ifdef" => Ok(PP::IfDef),
+            "ifndef" => Ok(PP::IfNDef),
+            "if" => Ok(PP::If),
+            "else" => Ok(PP::Else),
+            "elif" => Ok(PP::ElIf),
+            "endif" => Ok(PP::EndIf),
+            "org" => Ok(PP::Org),
+            "cseg" => Ok(PP::Cseg),
+            "dseg" => Ok(PP::Dseg),
+            "byte" => Ok(PP::Byte),
+            "double" => Ok(PP::Double),
+            "quad" => Ok(PP::Quad),
+            "var" => Ok(PP::Var),
             _ => Err(error!("Unrecognized preprocessor argument")),
         }
     }
@@ -594,7 +638,46 @@ impl FromStr for Ty {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum Instruction {}
+pub enum Instruction {
+    Add,
+    Sub,
+    Adc,
+    Sbc,
+    Nand,
+    Or,
+    Cmp,
+    Mv,
+    Ld,
+    St,
+    Lda,
+    Push,
+    Pop,
+    Jnz,
+    Halt,
+}
+
+impl Instruction {
+    fn description(&self) -> &'static str {
+        use Instruction as I;
+        match self {
+            I::Add => "`add`",
+            I::Sub => "`sub`",
+            I::Adc => "`adc`",
+            I::Sbc => "`sbc`",
+            I::Nand => "`nand`",
+            I::Or => "`or`",
+            I::Cmp => "`cmp`",
+            I::Mv => "`mv`",
+            I::Ld => "`ld`",
+            I::St => "`st`",
+            I::Lda => "`lda`",
+            I::Push => "`push`",
+            I::Pop => "`pop`",
+            I::Jnz => "`jnz`",
+            I::Halt => "`halt`",
+        }
+    }
+}
 
 impl FromStr for Instruction {
     type Err = ();
@@ -697,6 +780,33 @@ impl Punctuation {
         comma -> Punctuation::Comma,
         colon -> Punctuation::Colon,
     }
+
+    fn description(&self) -> &'static str {
+        use Punctuation as P;
+        match self {
+            P::And => "`&`",
+            P::AndAnd => "`&&`",
+            P::Caret => "`^`",
+            P::Colon => "`:`",
+            P::Comma => "`,`",
+            P::Eq => "`=`",
+            P::EqEq => "`==`",
+            P::Ge => "`>=`",
+            P::Gt => "`>`",
+            P::Le => "`<=`",
+            P::Lt => "`<`",
+            P::Minus => "`-`",
+            P::Ne => "`!=`",
+            P::Not => "`!` or `~`",
+            P::Or => "`|`",
+            P::OrOr => "`||`",
+            P::Plus => "`+`",
+            P::Shl => "`<<`",
+            P::Shr => "`>>`",
+            P::Slash => "/",
+            P::Star => "*",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -784,7 +894,6 @@ impl Span {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
 
     #[test]
     fn delim() {

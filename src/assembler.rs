@@ -4,7 +4,10 @@
 
 mod ascii;
 mod diagnostic;
+mod eval;
 mod lex;
+mod parse;
+mod token;
 pub use diagnostic::{Diagnostic, OptionalScream, ResultScream};
 
 use std::sync::OnceLock;

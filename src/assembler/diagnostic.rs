@@ -1,4 +1,4 @@
-use super::{Verbosity, VERBOSITY};
+use super::VERBOSITY;
 
 use super::lex::Span;
 
@@ -6,10 +6,11 @@ use colored::{Color, ColoredString, Colorize};
 use once_cell::sync::Lazy;
 use std::error::Error;
 use std::fmt;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 enum Location {
-    Span(Span),
+    Span(Arc<Span>),
     Panic {
         path: String,
         line: u32,
@@ -48,7 +49,7 @@ macro_rules! diagnostic_levels {
         }
 
         #[doc = concat!("Creates a new diagnostic with the [`", stringify!($level), "`] level, and the given `span` and `message`.")]
-        pub fn $spanned<T>(span: Span, message: T) -> Self
+        pub fn $spanned<T>(span: Arc<Span>, message: T) -> Self
         where
             T: Into<String>
         {
@@ -92,7 +93,7 @@ impl Diagnostic {
         }
     }
 
-    pub fn spanned<T>(span: Span, level: Level, message: T) -> Self
+    pub fn spanned<T>(span: Arc<Span>, level: Level, message: T) -> Self
     where
         T: Into<String>,
     {
@@ -157,7 +158,7 @@ impl Diagnostic {
         self
     }
 
-    pub fn set_span(&mut self, span: Span) {
+    pub fn set_span(&mut self, span: Arc<Span>) {
         self.location = Some(Location::Span(span));
     }
 
@@ -449,7 +450,7 @@ pub trait ResultScream<T, E> {
     where
         E: fmt::Debug;
 
-    fn spanned_unwrap(self, span: Span) -> T
+    fn spanned_unwrap(self, span: Arc<Span>) -> T
     where
         E: fmt::Debug;
 
@@ -464,7 +465,7 @@ pub trait ResultScream<T, E> {
     where
         E: fmt::Debug;
 
-    fn spanned_expect<M: Into<String>>(self, span: Span, message: M) -> T
+    fn spanned_expect<M: Into<String>>(self, span: Arc<Span>, message: M) -> T
     where
         E: fmt::Debug;
 
@@ -502,7 +503,7 @@ impl<T, E> ResultScream<T, E> for Result<T, E> {
 
     #[track_caller]
     #[inline(always)]
-    fn spanned_unwrap(self, span: Span) -> T
+    fn spanned_unwrap(self, span: Arc<Span>) -> T
     where
         E: fmt::Debug,
     {
@@ -530,7 +531,7 @@ impl<T, E> ResultScream<T, E> for Result<T, E> {
 
     #[track_caller]
     #[inline(always)]
-    fn spanned_expect<M: Into<String>>(self, span: Span, message: M) -> T
+    fn spanned_expect<M: Into<String>>(self, span: Arc<Span>, message: M) -> T
     where
         E: fmt::Debug,
     {
@@ -571,11 +572,11 @@ impl<T, E> ResultScream<T, E> for Result<T, E> {
 pub trait OptionalScream<T> {
     fn unwrap_or_scream(self) -> T;
 
-    fn spanned_unwrap(self, span: Span) -> T;
+    fn spanned_unwrap(self, span: Arc<Span>) -> T;
 
     fn expect_or_scream<M: Into<String>>(self, message: M) -> T;
 
-    fn spanned_expect<M: Into<String>>(self, span: Span, message: M) -> T;
+    fn spanned_expect<M: Into<String>>(self, span: Arc<Span>, message: M) -> T;
 
     fn unwrap_none_or_scream(self)
     where
@@ -598,7 +599,7 @@ impl<T> OptionalScream<T> for Option<T> {
 
     #[track_caller]
     #[inline(always)]
-    fn spanned_unwrap(self, span: Span) -> T {
+    fn spanned_unwrap(self, span: Arc<Span>) -> T {
         match self {
             Some(some) => some,
             None => spanned_scream(span, "called `Option::spanned_unwrap` on a `None` value"),
@@ -616,7 +617,7 @@ impl<T> OptionalScream<T> for Option<T> {
 
     #[track_caller]
     #[inline(always)]
-    fn spanned_expect<M: Into<String>>(self, span: Span, message: M) -> T {
+    fn spanned_expect<M: Into<String>>(self, span: Arc<Span>, message: M) -> T {
         match self {
             Some(some) => some,
             None => spanned_scream(span, message.into().as_ref()),
@@ -667,7 +668,7 @@ fn scream(msg: &str) -> ! {
 #[cold]
 #[track_caller]
 #[inline(never)]
-fn spanned_scream(span: Span, msg: &str) -> ! {
+fn spanned_scream(span: Arc<Span>, msg: &str) -> ! {
     Diagnostic::spanned_error(span, msg).scream()
 }
 
@@ -687,6 +688,6 @@ fn scream_with(msg: &str, value: &dyn fmt::Debug) -> ! {
 #[cold]
 #[track_caller]
 #[inline(never)]
-fn scream_with_span(span: Span, msg: &str, value: &dyn fmt::Debug) -> ! {
+fn scream_with_span(span: Arc<Span>, msg: &str, value: &dyn fmt::Debug) -> ! {
     Diagnostic::spanned_error(span, format!("{msg}: {value:?}")).scream()
 }
