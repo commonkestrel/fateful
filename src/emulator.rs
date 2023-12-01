@@ -432,11 +432,11 @@ impl fmt::Display for RegBank {
                 REGISTER C: {:#04X}\n\
                 REGISTER D: {:#04X}\n\
                 REGISTER E: {:#04X}\n\
+                REGISTER F: {:#04X}\n\
                 REGISTER H: {:#04X}\n\
                 REGISTER L: {:#04X}\n\
-                REGISTER F: {:#04X}\n\
             ",
-            self.a, self.b, self.c, self.d, self.e, self.h, self.l, self.f,
+            self.a, self.b, self.c, self.d, self.e, self.f, self.h, self.l,
         )
     }
 }
