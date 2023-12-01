@@ -22,7 +22,7 @@ pub struct Token {
 }
 
 impl Token {
-    fn description(&self) -> &'static str {
+    const fn description(&self) -> &'static str {
         use TokenInner as TI;
         match self.inner {
             TI::Address(_) => "address",
@@ -441,7 +441,7 @@ pub enum Ident {
 }
 
 impl Ident {
-    fn description(&self) -> &'static str {
+    const fn description(&self) -> &'static str {
         match self {
             Ident::Register(_) => "register",
             Ident::PreProc(pp) => pp.description(),
@@ -548,7 +548,7 @@ pub enum PreProc {
 }
 
 impl PreProc {
-    fn description(&self) -> &'static str {
+    const fn description(&self) -> &'static str {
         use PreProc as PP;
         match self {
             PP::Include => "`@include`",
@@ -657,7 +657,7 @@ pub enum Instruction {
 }
 
 impl Instruction {
-    fn description(&self) -> &'static str {
+    const fn description(&self) -> &'static str {
         use Instruction as I;
         match self {
             I::Add => "`add`",
@@ -707,6 +707,18 @@ impl Delimeter {
         close_bracket -> Delimeter::ClosedBracket,
         open_brace -> Delimeter::OpenBrace,
         close_brace -> Delimeter::ClosedBrace,
+    }
+
+    const fn description(&self) -> &'static str {
+        use Delimeter as D;
+        match self {
+            D::OpenParen => "`(`",
+            D::ClosedParen => "`)`",
+            D::OpenBracket => "`[`",
+            D::ClosedBracket => "`]`",
+            D::OpenBrace => "`{`",
+            D::ClosedBrace => "`}`",
+        }
     }
 }
 
@@ -781,7 +793,7 @@ impl Punctuation {
         colon -> Punctuation::Colon,
     }
 
-    fn description(&self) -> &'static str {
+    const fn description(&self) -> &'static str {
         use Punctuation as P;
         match self {
             P::And => "`&`",
