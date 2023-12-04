@@ -483,14 +483,30 @@ impl From<u8> for Instruction {
     }
 }
 
-#[bitfield]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct InstructionHeader {
-    #[bits = 3]
-    register: B3,
-    immediate: bool,
-    #[bits = 4]
-    instruction: Instruction,
+use __head::InstructionHeader;
+
+/// Seperate into a module to get rid
+/// of the dead code warning that was 
+/// driving me crazy.
+#[allow(dead_code)]
+mod __head {
+    use super::*;
+
+    #[bitfield]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct InstructionHeader {
+        #[bits = 3]
+        pub register: B3,
+        pub immediate: bool,
+        #[bits = 4]
+        pub instruction: Instruction,
+    }
+
+    impl InstructionHeader {
+        pub fn bits(&self) -> u8 {
+            self.bytes[0]
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -865,7 +881,7 @@ impl fmt::Display for State {
             self.bus,
             self.bank,
             self.cw(),
-            self.ctrl.head.bytes[0]
+            self.ctrl.head.bits()
         )
     }
 }
