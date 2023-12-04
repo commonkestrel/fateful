@@ -146,6 +146,11 @@ impl Diagnostic {
         self.message = message.into();
     }
 
+    pub fn as_bug(mut self) -> Self {
+        self.set_message("This is a bug. Please report this at https://github.com/commonkestrel/f8ful/issues");
+        self
+    }
+
     pub fn span(&self) -> Option<&Span> {
         match self.location {
             Some(Location::Span(ref s)) => Some(s),
