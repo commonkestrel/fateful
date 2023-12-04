@@ -1,6 +1,9 @@
+use std::sync::Arc;
+
+use crate::{ error, spanned_error };
 use super::ascii::AsciiStr;
-use super::lex::{self, Delimeter, PreProc, Punctuation, Token, TokenInner, TokenStream};
-use super::parse::{Cursor, Parsable};
+use super::lex::{self, Span, Delimeter, PreProc, Punctuation, Token, TokenInner, TokenStream};
+use super::parse::{Context, Parsable};
 use super::Diagnostic;
 
 /// A type-macro that expands to the name of the Rust type representation of a given token.
@@ -65,10 +68,11 @@ macro_rules! parsable {
             }
 
             impl $crate::assembler::parse::Parsable for $name {
-                fn parse(cursor: &mut $crate::assembler::parse::Cursor) -> Result<Self, Diagnostic> {
-                    match cursor.next() {
-                        Some($crate::assembler::lex::Token { inner: $crate::assembler::lex::TokenInner::$token($inner), span }) => Ok($name{ span: span.clone(), $($($field: ::std::borrow::ToOwned::to_owned($field)),*)? }),
-                        _ => Err(Diagnostic::error(concat!("Expected `", $symbol, "`"$(, "or `", $alt)?))),
+                fn parse(ctx: &mut $crate::assembler::parse::Context) -> Result<Self, Diagnostic> {
+                    match ctx.next() {
+                        Some($crate::assembler::lex::Token { inner: $crate::assembler::lex::TokenInner::$token($inner), span }) => Ok($name{ span: span, $($($field: ::std::borrow::ToOwned::to_owned($field)),*)? }),
+                        Some(tok) => Err(spanned_error!(tok.span, concat!("expected `", $symbol, "`"$(, "or `", $alt)?, ", found {}"), tok.inner.description())),
+                        _ => Err(error!(concat!("expected `", $symbol, "`"$(, "or `", $alt)?, ", found `eof`"))),
                     }
                 }
             }
@@ -83,10 +87,11 @@ macro_rules! parsable {
             }
 
             impl $crate::assembler::parse::Parsable for $name {
-                fn parse(cursor: &mut $crate::assembler::parse::Cursor) -> Result<Self, Diagnostic> {
-                    match cursor.next() {
-                        Some($crate::assembler::lex::Token { inner: $crate::assembler::lex::TokenInner::$token($inner), span }) => Ok($name{ span: span.clone(), $($($field: ::std::borrow::ToOwned::to_owned($field)),*)? }),
-                        _ => Err(Diagnostic::error(concat!("Expected",$(" ", stringify!($symbol)),+))),
+                fn parse(ctx: &mut $crate::assembler::parse::Context) -> Result<Self, Diagnostic> {
+                    match ctx.next() {
+                        Some($crate::assembler::lex::Token { inner: $crate::assembler::lex::TokenInner::$token($inner), span }) => Ok($name{ span: span, $($($field: $field),*)? }),
+                        Some(tok) => Err(spanned_error!(tok.span, concat!("expected", $(" ", stringify!($symbol)),+, "found {}"), tok.inner.description())),
+                        _ => Err(error!(concat!("expected",$(" ", stringify!($symbol)),+, ", found `eof`"))),
                     }
                 }
             }
@@ -97,12 +102,12 @@ macro_rules! parsable {
 /* Delimeters */
 
 parsable! {
-    '('; match Delimeter(Delimeter::OpenParen) => OpenParen,
-    ')'; match Delimeter(Delimeter::ClosedParen) => ClosedParen,
-    '['; match Delimeter(Delimeter::OpenBracket) => OpenBracket,
-    ']'; match Delimeter(Delimeter::ClosedBracket) => ClosedBracket,
-    '{'; match Delimeter(Delimeter::OpenBrace) => OpenBrace,
-    '}'; match Delimeter(Delimeter::OpenBrace) => ClosedBrace,
+    '(' ; match Delimeter(Delimeter::OpenParen) => OpenParen,
+    ')' ; match Delimeter(Delimeter::ClosedParen) => ClosedParen,
+    '[' ; match Delimeter(Delimeter::OpenBracket) => OpenBracket,
+    ']' ; match Delimeter(Delimeter::ClosedBracket) => ClosedBracket,
+    "{{"; match Delimeter(Delimeter::OpenBrace) => OpenBrace,
+    "}}"; match Delimeter(Delimeter::OpenBrace) => ClosedBrace,
 }
 
 /* Punctuation */
@@ -158,7 +163,6 @@ parsable! {
 parsable! {
     register; match Ident(lex::Ident::Register(inner)) => Register{pub inner: lex::Register},
     identifier; match Ident(lex::Ident::Ident(value)) => Ident{pub value: String},
-    instruction; match Ident(lex::Ident::Instruction(instruction)) => Instruction{pub instruction: lex::Instruction},
     type; match Ident(lex::Ident::Ty(ty)) => Ty{pub ty: lex::Ty},
 }
 
@@ -172,10 +176,24 @@ parsable! {
     doc string; match Doc(md) => Doc{pub md: String},
 }
 
+pub struct NewLine {
+    span: Arc<Span>,
+}
+
+impl Parsable for NewLine {
+    fn parse(ctx: &mut Context) -> Result<Self, Diagnostic> {
+        match ctx.next() {
+            Some(Token { span, inner: TokenInner::NewLine }) => Ok(NewLine { span }),
+            Some(tok) => Err(spanned_error!(tok.span, "expected newline, found {}", tok.inner.description())),
+            None => Err(error!("expected newline"))
+        }
+    }
+}
+
 impl Parsable for TokenStream {
-    fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
+    fn parse(ctx: &mut Context) -> Result<Self, Diagnostic> {
         let mut stream = Vec::new();
-        for tok in cursor {
+        for tok in ctx {
             if let Token {
                 span: _,
                 inner: TokenInner::NewLine,
@@ -187,5 +205,14 @@ impl Parsable for TokenStream {
             stream.push(tok.clone());
         }
         Ok(stream)
+    }
+}
+
+impl Parsable for Token {
+    fn parse(ctx: &mut Context) -> Result<Self, Diagnostic> {
+        match ctx.next() {
+            Some(tok) => Ok(tok.clone()),
+            None => Err(error!("expected token, found `eof`")),
+        }
     }
 }

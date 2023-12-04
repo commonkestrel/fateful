@@ -1,8 +1,7 @@
 use std::fmt;
-use std::fs::File;
-use std::io::{BufRead, BufReader, ErrorKind};
+use std::io::{BufRead, ErrorKind};
 use std::ops::Range;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -11,6 +10,7 @@ use super::diagnostic::Diagnostic;
 use super::Errors;
 use crate::error;
 use logos::{Lexer, Logos};
+use clio::{Input, ClioPath};
 
 pub type TokenStream = Vec<Token>;
 pub type LexResult = std::result::Result<TokenStream, Errors>;
@@ -21,15 +21,15 @@ pub struct Token {
     pub span: Arc<Span>,
 }
 
-impl Token {
-    const fn description(&self) -> &'static str {
+impl TokenInner {
+    pub const fn description(&self) -> &'static str {
         use TokenInner as TI;
-        match self.inner {
+        match self {
             TI::Address(_) => "address",
             TI::Char(_) => "character",
             TI::Delimeter(delim) => delim.description(),
             TI::Doc(_) => "doc string",
-            TI::Ident(ident) => ident.description(),
+            TI::Ident(ref ident) => ident.description(),
             TI::Immediate(_) => "immediate",
             TI::String(_) => "string",
             TI::NewLine => "newline",
@@ -63,77 +63,66 @@ impl FromStr for Token {
     }
 }
 
-pub fn lex<P: AsRef<Path>>(path: P) -> LexResult {
+pub fn lex(mut input: Input) -> LexResult {
     let mut tokens: TokenStream = Vec::new();
     let mut errs: Errors = Vec::new();
-    let source = Arc::new(path.as_ref().to_path_buf());
+    let source = Arc::new(input.path().to_owned());
 
     let mut prev_lines = String::new();
     let mut multiline = false;
 
-    match File::open(&path) {
-        Ok(file) => {
-            for (line_num, line) in BufReader::new(file).lines().enumerate() {
-                match line {
-                    Ok(line) => {
-                        // Treat multiple lines with `\` between them as one line
-                        if !multiline {
-                            prev_lines.clear();
-                        }
-                        if line.ends_with('\\') {
-                            prev_lines += &line[..line.len() - 1];
-                            multiline = true;
-                            continue;
-                        } else {
-                            multiline = false;
-                        }
+    let reader = input.lock();
+    for (line_num, line) in reader.lines().enumerate() {
+        match line {
+            Ok(line) => {
+                // Treat multiple lines with `\` between them as one line
+                if !multiline {
+                    prev_lines.clear();
+                }
+                if line.ends_with('\\') {
+                    prev_lines += &line[..line.len() - 1];
+                    multiline = true;
+                    continue;
+                } else {
+                    multiline = false;
+                }
 
-                        for (token, span) in
-                            TokenInner::lexer(&(prev_lines.clone() + &line)).spanned()
-                        {
-                            let spanned =
-                                span.start + prev_lines.len()..span.end + prev_lines.len();
-                            let span = Arc::new(Span {
-                                line: line_num,
-                                range: spanned,
-                                source: Source::File(source.clone()),
-                            });
-                            match token {
-                                Ok(tok) => tokens.push(Token { inner: tok, span }),
-                                Err(mut err) => {
-                                    err.set_span(span);
-                                    errs.push(err);
-                                }
-                            }
+                for (token, span) in
+                    TokenInner::lexer(&(prev_lines.clone() + &line)).spanned()
+                {
+                    let spanned =
+                        span.start + prev_lines.len()..span.end + prev_lines.len();
+                    let span = Arc::new(Span {
+                        line: line_num,
+                        range: spanned,
+                        source: Source::File(source.clone()),
+                    });
+                    match token {
+                        Ok(tok) => tokens.push(Token { inner: tok, span }),
+                        Err(mut err) => {
+                            err.set_span(span);
+                            errs.push(err);
                         }
-
-                        tokens.push(Token {
-                            inner: TokenInner::NewLine,
-                            span: Arc::new(Span {
-                                line: line_num,
-                                range: 0..0,
-                                source: Source::File(source.clone()),
-                            }),
-                        })
-                    }
-                    Err(err) => {
-                        errs.push(Diagnostic::error(match err.kind() {
-                            ErrorKind::InvalidData => format!("encountered invalid data on line {line_num} (likely not valid UTF-8)"),
-                            _ => format!("encountered an unexpected error while reading the input file on line {line_num}: {}", err.kind()),
-                        }));
-                        break;
                     }
                 }
+
+                tokens.push(Token {
+                    inner: TokenInner::NewLine,
+                    span: Arc::new(Span {
+                        line: line_num,
+                        range: 0..0,
+                        source: Source::File(source.clone()),
+                    }),
+                })
+            }
+            Err(err) => {
+                errs.push(Diagnostic::error(match err.kind() {
+                    ErrorKind::InvalidData => format!("encountered invalid data on line {line_num} (likely not valid UTF-8)"),
+                    _ => format!("encountered an unexpected error while reading the input file on line {line_num}: {}", err.kind()),
+                }));
+                break;
             }
         }
-        Err(err) => errs.push(Diagnostic::error(match err.kind() {
-            ErrorKind::NotFound => format!("unable to locate file: {}", path.as_ref().display()),
-            ErrorKind::PermissionDenied => "insufficient permissions".to_string(),
-            _ => format!(
-                "encountered an unexpected error while opening input file: {}",
-                err.kind()
-            ),
-        })),
     }
 
     if errs.is_empty() {
@@ -355,16 +344,6 @@ impl TokenInner {
         Ok(escaped[0])
     }
 
-    fn path(lex: &mut Lexer<TokenInner>) -> Option<Box<PathBuf>> {
-        let slice = lex.slice().strip_prefix("<")?.strip_suffix(">")?;
-        Some(Box::new(PathBuf::try_from(slice).ok()?))
-    }
-
-    fn path_string(lex: &mut Lexer<TokenInner>) -> Option<Box<PathBuf>> {
-        let slice = lex.slice().strip_prefix("<\"")?.strip_suffix("\">")?;
-        Some(Box::new(PathBuf::try_from(slice).ok()?))
-    }
-
     fn doc(lex: &mut Lexer<TokenInner>) -> Result<String, Diagnostic> {
         Ok(lex
             .slice()
@@ -433,7 +412,6 @@ impl Address {
 pub enum Ident {
     Register(Register),
     PreProc(PreProc),
-    Instruction(Instruction),
     Variable(String),
     MacroVariable(String),
     Ty(Ty),
@@ -445,7 +423,6 @@ impl Ident {
         match self {
             Ident::Register(_) => "register",
             Ident::PreProc(pp) => pp.description(),
-            Ident::Instruction(instr) => instr.description(),
             Ident::Variable(_) => "variable",
             Ident::MacroVariable(_) => "macro variable",
             Ident::Ty(_) => "type",
@@ -478,8 +455,6 @@ impl Ident {
 
         if let Ok(register) = Register::from_str(slice) {
             Ident::Register(register)
-        } else if let Ok(instruction) = Instruction::from_str(slice) {
-            Ident::Instruction(instruction)
         } else if let Ok(ty) = Ty::from_str(slice) {
             Ident::Ty(ty)
         } else {
@@ -637,58 +612,6 @@ impl FromStr for Ty {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
-pub enum Instruction {
-    Add,
-    Sub,
-    Adc,
-    Sbc,
-    Nand,
-    Or,
-    Cmp,
-    Mv,
-    Ld,
-    St,
-    Lda,
-    Push,
-    Pop,
-    Jnz,
-    Halt,
-}
-
-impl Instruction {
-    const fn description(&self) -> &'static str {
-        use Instruction as I;
-        match self {
-            I::Add => "`add`",
-            I::Sub => "`sub`",
-            I::Adc => "`adc`",
-            I::Sbc => "`sbc`",
-            I::Nand => "`nand`",
-            I::Or => "`or`",
-            I::Cmp => "`cmp`",
-            I::Mv => "`mv`",
-            I::Ld => "`ld`",
-            I::St => "`st`",
-            I::Lda => "`lda`",
-            I::Push => "`push`",
-            I::Pop => "`pop`",
-            I::Jnz => "`jnz`",
-            I::Halt => "`halt`",
-        }
-    }
-}
-
-impl FromStr for Instruction {
-    type Err = ();
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            _ => Err(()),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Delimeter {
     OpenParen,
@@ -823,14 +746,14 @@ impl Punctuation {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Source {
-    File(Arc<PathBuf>),
+    File(Arc<ClioPath>),
     String(Arc<String>),
 }
 
 impl fmt::Display for Source {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Source::File(path) => write!(f, "{}", path.as_path().display()),
+            Source::File(input) => write!(f, "{}", input.display()),
             Source::String(s) => {
                 if s.contains('\n') {
                     Ok(())
@@ -873,12 +796,12 @@ impl Span {
     pub fn line(&self) -> Result<String, Diagnostic> {
         match &self.source {
             Source::File(path) => {
-                let file = File::open(path.as_ref()).map_err(|_| {
-                    Diagnostic::error(format!("Unable to open file {}", path.as_path().display()))
+                let mut input = (**path).to_owned().open().map_err(|_| {
+                    Diagnostic::error(format!("Unable to read input {}", path.display()))
                 })?;
-                let reader = BufReader::new(file);
+                let reader = input.lock();
 
-                reader
+                let line = reader
                     .lines()
                     .nth(self.line)
                     .ok_or_else(|| {
@@ -888,9 +811,11 @@ impl Span {
                         Diagnostic::error(format!(
                             "Unable to read line {} from file {}",
                             self.line,
-                            path.as_path().display()
+                            path.display()
                         ))
-                    })
+                    });
+
+                line
             }
             Source::String(s) => s
                 .lines()

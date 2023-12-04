@@ -8,6 +8,7 @@ mod eval;
 mod lex;
 mod parse;
 mod token;
+mod assemble;
 pub use diagnostic::{Diagnostic, OptionalScream, ResultScream};
 
 use std::sync::OnceLock;
@@ -26,7 +27,7 @@ pub struct AssemblerArgs {
 
     #[clap(value_parser, default_value = "-")]
     input: Input,
-    #[clap(value_parser, default_value = "-")]
+    #[clap(short, long, value_parser, default_value = "-")]
     output: Output,
 }
 
@@ -35,7 +36,7 @@ pub type Errors = Vec<Diagnostic>;
 pub static VERBOSITY: OnceLock<Verbosity> = OnceLock::new();
 
 pub async fn assemble(
-    _args: AssemblerArgs,
+    args: AssemblerArgs,
     verbosity: clap_verbosity_flag::Verbosity<WarnLevel>,
 ) -> Result<(), Errors> {
     let verbose = match verbosity.log_level() {
@@ -49,7 +50,9 @@ pub async fn assemble(
     };
     VERBOSITY.set(verbose).expect("verbosity should be empty");
 
-    todo!()
+    let lexed = lex::lex(args.input)?;
+
+    todo!();
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
