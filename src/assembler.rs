@@ -10,6 +10,7 @@ mod parse;
 mod token;
 mod assemble;
 pub use diagnostic::{Diagnostic, OptionalScream, ResultScream};
+use crate::error;
 
 use std::sync::OnceLock;
 
@@ -36,7 +37,7 @@ pub type Errors = Vec<Diagnostic>;
 pub static VERBOSITY: OnceLock<Verbosity> = OnceLock::new();
 
 pub async fn assemble(
-    args: AssemblerArgs,
+    mut args: AssemblerArgs,
     verbosity: clap_verbosity_flag::Verbosity<WarnLevel>,
 ) -> Result<(), Errors> {
     let verbose = match verbosity.log_level() {
@@ -51,8 +52,11 @@ pub async fn assemble(
     VERBOSITY.set(verbose).expect("verbosity should be empty");
 
     let lexed = lex::lex(args.input)?;
+    let parsed = parse::parse(lexed)?;
+    let assembled = assemble::assemble(parsed)?;
 
-    todo!();
+    args.output.lock().write(&assembled).map_err(|err| vec![error!("failed to write to output: {err}")])?;
+    args.output.finish().map_err(|err| vec![error!("failed to finalize output: {err}")])
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
