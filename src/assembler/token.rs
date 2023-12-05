@@ -35,22 +35,23 @@ macro_rules! Token {
     [>>] => {$crate::assembler::token::Shr};
     [,] => {$crate::assembler::token::Comma};
     [:] => {$crate::assembler::token::Colon};
-    [@MACRO] => {$crate::assembler::token::Macro};
-    [@DEFINE] => {$crate::assembler::token::Define};
-    [@UNDEF] => {$crate::assembler::token::UnDef};
-    [@IFDEF] => {$crate::assembler::token::IfDef};
-    [@IFNDEF] => {$crate::assembler::token::IfNDef};
-    [@IF] => {$crate::assembler::token::If};
-    [@ELIF] => {$crate::assembler::token::Elif};
-    [@ELSE] => {$crate::assembler::token::Else};
-    [@ENDIF] => {$crate::assembler::token::EndIf};
-    [@ORG] => {$crate::assembler::token::Org};
-    [@CSEG] => {$crate::assembler::token::Cseg};
-    [@DSEG] => {$crate::assembler::token::Dseg};
-    [@BYTE] => {$crate::assembler::token::Byte};
-    [@DOUBLE] => {$crate::assembler::token::Double};
-    [@QUAD] => {$crate::assembler::token::Quad};
-    [@VAR] => {$crate::assembler::token::Var};
+    [@macro] => {$crate::assembler::token::Macro};
+    [@define] => {$crate::assembler::token::Define};
+    [@undef] => {$crate::assembler::token::UnDef};
+    [@ifdef] => {$crate::assembler::token::IfDef};
+    [@ifndef] => {$crate::assembler::token::IfNDef};
+    [@if] => {$crate::assembler::token::If};
+    [@elif] => {$crate::assembler::token::Elif};
+    [@else] => {$crate::assembler::token::Else};
+    [@endif] => {$crate::assembler::token::EndIf};
+    [@org] => {$crate::assembler::token::Org};
+    [@cseg] => {$crate::assembler::token::Cseg};
+    [@dseg] => {$crate::assembler::token::Dseg};
+    [@byte] => {$crate::assembler::token::Byte};
+    [@double] => {$crate::assembler::token::Double};
+    [@quad] => {$crate::assembler::token::Quad};
+    [@str] => {$crate::assembler::token::Str};
+    [@var] => {$crate::assembler::token::Var};
 }
 
 /// Creates a struct for a varient of [`TokenInner`][crate::lex::TokenInner] and implements [`Parse`] for it.
@@ -155,6 +156,7 @@ parsable! {
     "@byte"   ; match Ident(lex::Ident::PreProc(PreProc::Byte)) => Byte,
     "@double" ; match Ident(lex::Ident::PreProc(PreProc::Double)) => Double,
     "@quad"   ; match Ident(lex::Ident::PreProc(PreProc::Quad)) => Quad,
+    "@str"    ; match Ident(lex::Ident::PreProc(PreProc::Str)) => Str,
     "@var"    ; match Ident(lex::Ident::PreProc(PreProc::Var)) => Var,
 }
 
@@ -164,6 +166,8 @@ parsable! {
     register; match Ident(lex::Ident::Register(inner)) => Register{pub inner: lex::Register},
     identifier; match Ident(lex::Ident::Ident(value)) => Ident{pub value: String},
     type; match Ident(lex::Ident::Ty(ty)) => Ty{pub ty: lex::Ty},
+    macro variable; match Ident(lex::Ident::MacroVariable(name)) => MacroVariable{ pub name: String },
+    variable; match Ident(lex::Ident::Variable(name)) => Variable{ pub name: String },
 }
 
 /* Literals */
@@ -176,6 +180,7 @@ parsable! {
     doc string; match Doc(md) => Doc{pub md: String},
 }
 
+#[derive(Debug)]
 pub struct NewLine {
     span: Arc<Span>,
 }
