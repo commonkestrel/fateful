@@ -1,5 +1,6 @@
-use super::{ parse::{CSeg, DSeg}, Errors };
+use super::{ parse::Context, Errors };
 
-pub fn assemble(code: Vec<CSeg>, data: Vec<DSeg>) -> Result<Vec<u8>, Errors> {
+pub fn assemble(ctx: Context) -> Result<Vec<u8>, Errors> {
+    println!("{ctx:#?}");
     todo!()
 }
