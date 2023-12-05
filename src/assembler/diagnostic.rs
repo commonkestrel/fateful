@@ -158,8 +158,19 @@ impl Diagnostic {
         }
     }
 
-    pub fn with_help<T: Into<String>>(mut self, message: T) -> Self {
+    pub fn with_help<T>(mut self, message: T) -> Self
+    where
+        T: Into<String>
+    {
         self.children.push(Child::new(Level::Help, message));
+        self
+    }
+
+    pub fn with_spanned_help<T>(mut self, span: Arc<Span>, message: T) -> Self
+    where
+        T: Into<String>
+    {
+        self.children.push(Child::spanned(Level::Help, message, span));
         self
     }
 
@@ -263,7 +274,7 @@ impl fmt::Display for Diagnostic {
             );
 
             let children = self.children.iter().fold(String::new(), |fold, child| {
-                fold + &format!("{:>width$} {}", "=", child, width = spaces + 1)
+                fold + &format!("{:>width$} {}\n", "=", child, width = spaces + 1)
             });
 
             write!(
@@ -293,7 +304,12 @@ impl fmt::Display for Diagnostic {
                 column
             )
         } else {
-            write!(f, "{}", self.format_message(false))
+            let fmt = self.format_message(false);
+            let children = self.children.iter().fold(String::new(), |fold, child| {
+                fold + &format!("\n= {child}")
+            });
+
+            write!(f, "{fmt}{children}")
         }
     }
 }
@@ -363,13 +379,13 @@ macro_rules! spanned_warn {
     ($span:expr, $($arg:tt)*) => ($crate::assembler::diagnostic::Diagnostic::spanned_warn($span, ::std::format!($($arg)*)))
 }
 #[macro_export]
-macro_rules! info {
-    ($($arg:tt)*) => ($crate::assembler::diagnostic::Diagnostic::info(::std::format!($($arg)*)))
+macro_rules! note {
+    ($($arg:tt)*) => ($crate::assembler::diagnostic::Diagnostic::note(::std::format!($($arg)*)))
 }
 
 #[macro_export]
-macro_rules! spanned_info {
-    ($span:expr, $($arg:tt)*) => ($crate::assembler::diagnostic::Diagnostic::spanned_info($span, ::std::format!($($arg)*)))
+macro_rules! spanned_note {
+    ($span:expr, $($arg:tt)*) => ($crate::assembler::diagnostic::Diagnostic::spanned_note($span, ::std::format!($($arg)*)))
 }
 #[macro_export]
 macro_rules! debug {
@@ -385,6 +401,7 @@ macro_rules! spanned_debug {
 struct Child {
     level: Level,
     message: String,
+    span: Option<Arc<Span>>,
 }
 
 impl Child {
@@ -396,6 +413,19 @@ impl Child {
         Child {
             level,
             message: message.into(),
+            span: None,
+        }
+    }
+
+    #[inline]
+    fn spanned<T>(level: Level, message: T, span: Arc<Span>) -> Child
+    where
+        T: Into<String>
+    {
+        Child {
+            level,
+            message: message.into(),
+            span: Some(span),
         }
     }
 }
@@ -429,19 +459,16 @@ impl fmt::Display for Child {
         match self.level {
             Level::Error => write!(
                 f,
-                "{}",
-                format!("{}: {}", "error".red(), self.message).bold()
+                "{}: {}", "error".red().bold(), self.message,
             ),
             Level::Warning => write!(
                 f,
-                "{}",
-                format!("{}: {}", "warning".yellow(), self.message).bold()
+                "{}: {}", "warning".yellow().bold(), self.message,
             ),
-            Level::Note => write!(f, "{}", format!("note: {}", self.message).bold()),
+            Level::Note => write!(f, "{}: {}", "note".bold(), self.message),
             Level::Help => write!(
                 f,
-                "{}",
-                format!("{}: {}", "help".truecolor(150, 150, 255), self.message).bold()
+                "{}: {}", "help".truecolor(150, 150, 255).bold(), self.message,
             ),
         }
     }
