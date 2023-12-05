@@ -598,10 +598,32 @@ bitflags! {
     }
 }
 
+impl From<Vec<Ty>> for Types {
+    fn from(value: Vec<Ty>) -> Self {
+        let mut types = Types::empty();
+
+        for ty in value {
+            types.insert(match ty.ty {
+                lex::Ty::Reg => Types::REG,
+                lex::Ty::Addr => Types::ADDR,
+                lex::Ty::Label => Types::LABEL,
+                lex::Ty::Str => Types::STR,
+                lex::Ty::Imm8 => Types::IMM8,
+                lex::Ty::Imm16 => Types::IMM16,
+                lex::Ty::Imm32 => Types::IMM32,
+                lex::Ty::Imm64 => Types::IMM64,
+                lex::Ty::Any => Types::all(),
+            })
+        }
+
+        types
+    }
+}
+
 #[derive(Debug)]
 pub struct Parameter {
+    name: MacroVariable,
     types: Types,
-    name: String,
 }
 
 impl Parameter {
@@ -649,7 +671,7 @@ impl MacroDef {
         let parameters: HashMap<String, &Token> = HashMap::from_iter(
             self.parameters
                 .iter()
-                .map(|p| p.name.to_owned())
+                .map(|p| p.name.name.to_owned())
                 .zip(parameters.into_iter()),
         );
 
@@ -671,12 +693,12 @@ impl MacroDef {
 
     fn parse_inputs(ctx: &mut Context) -> Result<Vec<Parameter>, Diagnostic> {
         let paren: OpenParen = ctx.parse()?;
-        let params: Vec<Parameter> = Vec::new();
+        let mut params: Vec<Parameter> = Vec::new();
 
         while ctx.peek().is_some() {
             let var: MacroVariable = ctx.parse()?;
             for param in params.iter() {
-                if param.name == var.name {
+                if param.name.name == var.name {
                     return Err(spanned_error!(var.span, "duplicate parameter `{}`", var.name))
                 }
             }
@@ -689,6 +711,11 @@ impl MacroDef {
                         let _close: ClosedParen = ctx.parse()?;
                         return Ok(params);
                     }
+                    TokenInner::Punctuation(Punctuation::Comma) => {
+
+                        ctx.position += 1;
+                        break;
+                    }
                     _ => {
                         let _or: Token![|] = ctx.parse()?;
                         let ty: Ty = ctx.parse()?;
@@ -696,6 +723,8 @@ impl MacroDef {
                     }
                 }
             }
+
+            params.push(Parameter{ name: var, types: types.into() })
         }
 
         Err(spanned_error!(paren.span, "unmatched delimeter; expected closing `)`"))
@@ -733,6 +762,7 @@ impl Parsable for Macro {
         let proc: Token![@macro] = ctx.parse()?;
         let name: Ident = ctx.parse()?;
         let bracket: OpenBrace = ctx.parse()?;
+        let _nl: NewLine = ctx.parse()?;
     
         let mut rules = Vec::new();
 
@@ -745,6 +775,7 @@ impl Parsable for Macro {
                     let _nl: NewLine = ctx.parse()?;
                     return Ok(Macro { name, rules })
                 },
+                TI::NewLine => ctx.position += 1,
                 _ => return Err(spanned_error!(tok.span.clone(), "expected start of rule definition or end of macro, found {}", tok.inner.description())),
             }
         }
@@ -764,7 +795,7 @@ impl Parsable for Braced {
     fn parse(ctx: &mut Context) -> Result<Self, Diagnostic> {
         let open: OpenBrace = ctx.parse()?;
         let mut tokens = TokenStream::new();
-        let mut depth = 0;
+        let mut depth = 1;
 
         while let Some(tok) = ctx.peek() {
             match tok.inner {

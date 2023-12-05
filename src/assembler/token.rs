@@ -91,7 +91,7 @@ macro_rules! parsable {
                 fn parse(ctx: &mut $crate::assembler::parse::Context) -> Result<Self, Diagnostic> {
                     match ctx.next() {
                         Some($crate::assembler::lex::Token { inner: $crate::assembler::lex::TokenInner::$token($inner), span }) => Ok($name{ span: span, $($($field: $field),*)? }),
-                        Some(tok) => Err(spanned_error!(tok.span, concat!("expected", $(" ", stringify!($symbol)),+, "found {}"), tok.inner.description())),
+                        Some(tok) => Err(spanned_error!(tok.span, concat!("expected", $(" ", stringify!($symbol)),+, ", found {}"), tok.inner.description())),
                         _ => Err(error!(concat!("expected",$(" ", stringify!($symbol)),+, ", found `eof`"))),
                     }
                 }
@@ -108,7 +108,7 @@ parsable! {
     '[' ; match Delimeter(Delimeter::OpenBracket) => OpenBracket,
     ']' ; match Delimeter(Delimeter::ClosedBracket) => ClosedBracket,
     "{{"; match Delimeter(Delimeter::OpenBrace) => OpenBrace,
-    "}}"; match Delimeter(Delimeter::OpenBrace) => ClosedBrace,
+    "}}"; match Delimeter(Delimeter::ClosedBrace) => ClosedBrace,
 }
 
 /* Punctuation */
