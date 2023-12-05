@@ -1,7 +1,6 @@
 use std::fmt;
 use std::io::{BufRead, ErrorKind};
 use std::ops::Range;
-use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -187,7 +186,7 @@ where
 pub enum TokenInner {
     #[regex(r"0b[01][_01]*", TokenInner::binary)]
     #[regex(r"0o[0-7][_0-7]*", TokenInner::octal)]
-    #[regex(r"-?[1-9][_0-9]*", TokenInner::decimal)]
+    #[regex(r"-?[0-9][_0-9]*", TokenInner::decimal)]
     #[regex(r"0x[0-9a-fA-F][_0-9a-fA-F]*", TokenInner::hexadecimal)]
     Immediate(i128),
 
@@ -364,10 +363,10 @@ impl Address {
     fn trim(lex: &mut Lexer<TokenInner>) -> Result<String, Diagnostic> {
         Ok(lex
             .slice()
-            .strip_prefix("[0b")
-            .ok_or_else(|| Diagnostic::error("binary address does not start with `[0b`"))?
+            .strip_prefix("[")
+            .ok_or_else(|| error!("address does not start with `[`"))?
             .strip_suffix("]")
-            .ok_or_else(|| Diagnostic::error("binary address does not end with `]`"))?
+            .ok_or_else(|| error!("address does not end with `]`"))?
             .replace("_", ""))
     }
 
@@ -375,7 +374,7 @@ impl Address {
         let slice = Address::trim(lex)?;
 
         Ok(Address::Immediate(u16::from_str_radix(&slice, 2).map_err(|err| {
-            Diagnostic::error(format!("address must be a valid 16-bit integer: {err}"))
+            error!("address must be a valid 16-bit integer: {err}")
         })?))
     }
 
@@ -383,7 +382,7 @@ impl Address {
         let slice = Address::trim(lex)?;
 
         Ok(Address::Immediate(u16::from_str_radix(&slice, 8).map_err(|err| {
-            Diagnostic::error(format!("address must be a valid 16-bit integer: {err}"))
+            error!("address must be a valid 16-bit integer: {err}")
         })?))
     }
 
@@ -391,7 +390,7 @@ impl Address {
         let slice = Address::trim(lex)?;
 
         Ok(Address::Immediate(u16::from_str_radix(&slice, 10).map_err(|err| {
-            Diagnostic::error(format!("address must be a valid 16-bit integer: {err}"))
+            error!("address must be a valid 16-bit integer: {err}")
         })?))
     }
 
@@ -399,7 +398,7 @@ impl Address {
         let slice = Address::trim(lex)?;
 
         Ok(Address::Immediate(u16::from_str_radix(&slice, 16).map_err(|err| {
-            Diagnostic::error(format!("address must be a valid 16-bit integer: {err}"))
+            error!("address must be a valid 16-bit integer: {err}")
         })?))
     }
 
@@ -519,6 +518,7 @@ pub enum PreProc {
     Byte,
     Double,
     Quad,
+    Str,
     Var,
 }
 
@@ -542,6 +542,7 @@ impl PreProc {
             PP::Byte => "`@byte`",
             PP::Double => "`@double`",
             PP::Quad => "`@quad`",
+            PP::Str => "`@str`",
             PP::Var => "`@var`",
         }
     }
@@ -574,6 +575,7 @@ impl FromStr for PreProc {
             "byte" => Ok(PP::Byte),
             "double" => Ok(PP::Double),
             "quad" => Ok(PP::Quad),
+            "str" => Ok(PP::Str),
             "var" => Ok(PP::Var),
             _ => Err(error!("Unrecognized preprocessor argument")),
         }
@@ -649,45 +651,45 @@ impl Delimeter {
 pub enum Punctuation {
     /// `=` (variable assignment)
     Eq,
-    /// `=` (pre-proc eval: equality)
+    /// `=` (*pre-proc eval*: equality)
     EqEq,
-    /// `!=` (pre-proc eval: not equal)
+    /// `!=` (*pre-proc eval*: not equal)
     Ne,
-    /// `<` (pre-proc eval: less than)
+    /// `<` (*pre-proc eval*: less than)
     Lt,
-    /// `<=` (pre-proc eval: less or equal)
+    /// `<=` (*pre-proc eval*: less or equal)
     Le,
-    /// `>` (pre-proc eval: greater than)
+    /// `>` (*pre-proc eval*: greater than)
     Gt,
-    /// `>=` (pre-proc eval: greater or equal)
+    /// `>=` (*pre-proc eval*: greater or equal)
     Ge,
-    /// `&` (expression parsing: bitwise and)
+    /// `&` (*expression parsing*: bitwise and)
     And,
-    /// `&&` (pre-proc eval: and)
+    /// `&&` (*pre-proc eval*: and)
     AndAnd,
-    /// `|` (expression parsing: bitwise or)
+    /// `|` (*expression parsing*: bitwise or, *macro parsing*: type seperator)
     Or,
-    /// `||` (pre-proc eval: or)
+    /// `||` (*pre-proc eval*: or)
     OrOr,
-    /// `^` (expression parsing: bitwise xor)
+    /// `^` (*expression parsing*: bitwise xor)
     Caret,
-    /// `!` or `~` (expression parsing: bitwise not)
+    /// `!` or `~` (*expression parsing*: bitwise not)
     Not,
-    /// `/` (expression parsing: division) (pre-proc eval: path seperator)
+    /// `/` (*expression parsing*: division) (*pre-proc eval*: path seperator)
     Slash,
-    /// `+` (expression parsing: addition)
+    /// `+` (*expression parsing*: addition)
     Plus,
-    /// `-` (expression parsing: subtraction)
+    /// `-` (*expression parsing*: subtraction)
     Minus,
-    /// `*` (expression parsing: multiplication)
+    /// `*` (*expression parsing*: multiplication)
     Star,
-    /// `<<` (expression parsing: shift left)
+    /// `<<` (*expression parsing*: shift left)
     Shl,
-    /// `>>` (expression parsing: shift right)
+    /// `>>` (*expression parsing*: shift right)
     Shr,
     /// `,` (argument seperator)
     Comma,
-    /// `:` (label definition)
+    /// `:` (label definition, type seperator)
     Colon,
 }
 
