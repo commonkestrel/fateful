@@ -8,23 +8,18 @@
 use super::{
     diagnostic::Diagnostic,
     eval,
-    lex::{self, PreProc, Register, Span, Token, TokenInner, TokenStream},
+    lex::{self, PreProc, Register, Span, Token, TokenInner, TokenStream, Delimeter},
     token,
-    token::{Ident, Immediate, NewLine},
+    token::{Ident, Immediate, NewLine, OpenBrace, ClosedBrace, OpenParen, ClosedParen, MacroVariable, Ty},
     Errors,
 };
-use crate::{error, spanned_error, Token, assembler::lex::Punctuation};
+use crate::{error, spanned_error, Token, assembler::lex::Punctuation, note};
 
 use std::{collections::HashMap, iter, str::FromStr, sync::Arc};
 
 use bitflags::bitflags;
 
-pub fn parse(stream: TokenStream) -> Result<(), Errors> {
-    let proc_stream = pre_proc(stream)?;
-
-    Err(vec![error!("Parsing not yet implemented")])
-}
-
+#[derive(Debug)]
 struct Punctuated<T, S> {
     list: Vec<(T, S)>,
     last: Option<T>,
@@ -71,6 +66,7 @@ where
     }
 }
 
+#[derive(Debug)]
 enum Segment {
     CSeg(CSeg),
     DSeg(DSeg),
@@ -90,6 +86,7 @@ struct PostProc {
     variables: HashMap<String, u16>,
 }
 
+#[derive(Debug)]
 pub struct DSeg {
     dseg: token::Dseg,
     org: Option<Immediate>,
@@ -155,12 +152,14 @@ impl DSeg {
     }
 }
 
+#[derive(Debug)]
 pub struct CSeg {
     cseg: Option<token::Cseg>,
     org: Option<Immediate>,
     tokens: Vec<ExpTok>,
 }
 
+#[derive(Debug)]
 pub struct Context {
     code: Vec<CSeg>,
     data: Vec<DSeg>,
@@ -191,6 +190,7 @@ impl Iterator for Context {
     }
 }
 
+#[derive(Debug)]
 enum ExpTok {
     Label(Label),
     Instruction(Inst),
@@ -213,18 +213,20 @@ impl Parsable for ExpTok {
     }
 }
 
+#[derive(Debug)]
 struct Inst {
     name: Ident,
     args: Punctuated<Token, Token![,]>,
 }
 
+#[derive(Debug)]
 struct Label {
     name: Ident,
     colon: Token![:],
     nl: NewLine,
 }
 
-fn pre_proc(mut stream: TokenStream) -> Result<(), Errors> {
+pub fn parse(mut stream: TokenStream) -> Result<Context, Errors> {
     let mut ctx = Context {
         code: Vec::new(),
         data: Vec::new(),
@@ -255,7 +257,7 @@ fn pre_proc(mut stream: TokenStream) -> Result<(), Errors> {
     if !errors.is_empty() {
         return Err(errors);
     } else {
-        Ok(())
+        Ok(ctx)
     }
 }
 
@@ -307,7 +309,14 @@ fn expand_preproc(peek: Token, ctx: &mut Context) -> Result<(), Diagnostic> {
             }
             
         }
-        _ => {},
+        TI::Ident(lex::Ident::PreProc(PreProc::Macro)) => {
+            let mac: Macro = ctx.parse()?;
+            let name = mac.name.clone();
+            if let Some(_) = ctx.macros.insert(mac.name.value.to_owned(), mac) {
+                return Err(spanned_error!(name.span, "duplicate definitions of macro `{}`", name.value));
+            }
+        }
+        _ => ctx.position += 1,
     }
 
     Ok(())
@@ -330,11 +339,11 @@ fn eval_if(ctx: &mut Context) -> Result<(), Diagnostic> {
         match tok.inner {
             TI::Ident(lex::Ident::PreProc(PreProc::If))
             | TI::Ident(lex::Ident::PreProc(PreProc::IfDef)) => {
-                _ = ctx.next();
+                ctx.position += 1;
                 depth += 1;
             }
             TI::Ident(lex::Ident::PreProc(PreProc::EndIf)) => {
-                _ = ctx.next();
+                ctx.position += 1;
                 if depth == 0 {
                     break;
                 } else {
@@ -368,7 +377,11 @@ fn eval_if(ctx: &mut Context) -> Result<(), Diagnostic> {
             }
             _ => {
                 if eval {
-                    out.push(tok.clone());
+                    // we know we will recieve `Some()` from `next()`,
+                    // since we recieved `Some()` from `peek()`.
+                    out.push(unsafe {ctx.next().unwrap_unchecked() });
+                } else {
+                    ctx.position += 1;
                 }
             }
         }
@@ -392,14 +405,14 @@ fn if_expr(ctx: &mut Context) -> Result<bool, Diagnostic> {
             )
         })?;
 
-    if start == end {
+    if end == 0 {
         return Err(spanned_error!(
             ctx.stream[start].span.clone(),
             "expected expression, found newline"
         ));
     }
 
-    let eval = eval::eval_no_paren(&ctx.stream[start..end], &ctx.defines)?;
+    let eval = eval::eval_no_paren(&ctx.stream[start..(start+end)], &ctx.defines)?;
 
     Ok(eval > 0)
 }
@@ -438,7 +451,7 @@ pub struct Org {
 
 impl Parsable for Org {
     fn parse(ctx: &mut Context) -> Result<Self, Diagnostic> {
-        let org: Token![@ORG] = ctx.parse()?;
+        let org: Token![@org] = ctx.parse()?;
         let addr: Immediate = ctx.parse()?;
 
         Ok(Org {
@@ -460,7 +473,7 @@ pub struct Define {
 
 impl Parsable for Define {
     fn parse(ctx: &mut Context) -> Result<Self, Diagnostic> {
-        let _def: Token![@DEFINE] = ctx.parse()?;
+        let _def: Token![@define] = ctx.parse()?;
         let name: Ident = ctx.parse()?;
         let assignment: TokenStream = ctx.parse()?;
 
@@ -585,6 +598,7 @@ bitflags! {
     }
 }
 
+#[derive(Debug)]
 pub struct Parameter {
     types: Types,
     name: String,
@@ -610,9 +624,10 @@ impl Parameter {
     }
 }
 
+#[derive(Debug)]
 pub struct MacroDef {
     parameters: Vec<Parameter>,
-    tokens: TokenStream,
+    expansion: Braced,
 }
 
 impl MacroDef {
@@ -629,7 +644,7 @@ impl MacroDef {
 
     /// Must make sure that the provided parameters match this rule with [`MacroDef::fits`]
     pub fn expand(&self, parameters: &[Token]) -> Result<TokenStream, Diagnostic> {
-        let mut expanded = TokenStream::with_capacity(self.tokens.len());
+        let mut expanded = TokenStream::with_capacity(self.expansion.tokens.len());
 
         let parameters: HashMap<String, &Token> = HashMap::from_iter(
             self.parameters
@@ -638,7 +653,7 @@ impl MacroDef {
                 .zip(parameters.into_iter()),
         );
 
-        for token in self.tokens.iter() {
+        for token in self.expansion.tokens.iter() {
             expanded.push(match &token.inner {
                 TokenInner::Ident(lex::Ident::MacroVariable(name)) => {
                     (*parameters.get(name).ok_or(spanned_error!(
@@ -653,20 +668,121 @@ impl MacroDef {
 
         Ok(expanded)
     }
+
+    fn parse_inputs(ctx: &mut Context) -> Result<Vec<Parameter>, Diagnostic> {
+        let paren: OpenParen = ctx.parse()?;
+        let params: Vec<Parameter> = Vec::new();
+
+        while ctx.peek().is_some() {
+            let var: MacroVariable = ctx.parse()?;
+            for param in params.iter() {
+                if param.name == var.name {
+                    return Err(spanned_error!(var.span, "duplicate parameter `{}`", var.name))
+                }
+            }
+            let _seperator: Token![:] = ctx.parse()?;
+            let mut types = vec![ctx.parse()?];
+
+            while let Some(tok) = ctx.peek() {
+                match tok.inner {
+                    TokenInner::Delimeter(Delimeter::ClosedParen) => {
+                        let _close: ClosedParen = ctx.parse()?;
+                        return Ok(params);
+                    }
+                    _ => {
+                        let _or: Token![|] = ctx.parse()?;
+                        let ty: Ty = ctx.parse()?;
+                        types.push(ty);
+                    }
+                }
+            }
+        }
+
+        Err(spanned_error!(paren.span, "unmatched delimeter; expected closing `)`"))
+    }
 }
 
+impl Parsable for MacroDef {
+    fn parse(ctx: &mut Context) -> Result<Self, Diagnostic> {
+        let inputs = Self::parse_inputs(ctx)?;
+        let expansion: Braced = ctx.parse()?;
+
+        Ok(MacroDef { parameters: inputs, expansion })
+    }
+}
+
+#[derive(Debug)]
 pub struct Macro {
     name: Ident,
-    definitions: Vec<MacroDef>,
+    rules: Vec<MacroDef>,
 }
 
 impl Macro {
     fn expand(self, span: Arc<Span>, parameters: Vec<Token>) -> Result<TokenStream, Diagnostic> {
         let rule = self
-            .definitions
+            .rules
             .iter()
             .find(|def| def.fits(&parameters))
-            .ok_or_else(|| spanned_error!(span, "no rules matched "))?;
+            .ok_or_else(|| spanned_error!(span, "no rules matched these arguments"))?;
         rule.expand(&parameters)
+    }
+}
+
+impl Parsable for Macro {
+    fn parse(ctx: &mut Context) -> Result<Self, Diagnostic> {
+        let proc: Token![@macro] = ctx.parse()?;
+        let name: Ident = ctx.parse()?;
+        let bracket: OpenBrace = ctx.parse()?;
+    
+        let mut rules = Vec::new();
+
+        while let Some(tok) = ctx.peek() {
+            use TokenInner as TI;
+            match tok.inner {
+                TI::Delimeter(Delimeter::OpenParen) => rules.push(ctx.parse()?),
+                TI::Delimeter(Delimeter::ClosedBrace) => {
+                    let _close: ClosedBrace = ctx.parse()?;
+                    let _nl: NewLine = ctx.parse()?;
+                    return Ok(Macro { name, rules })
+                },
+                _ => return Err(spanned_error!(tok.span.clone(), "expected start of rule definition or end of macro, found {}", tok.inner.description())),
+            }
+        }
+
+        Err(spanned_error!(bracket.span, "unmatched delimeter; expected closing `}}`"))
+    }
+}
+
+#[derive(Debug)]
+struct Braced {
+    open: OpenBrace,
+    tokens: TokenStream,
+    close: ClosedBrace,
+}
+
+impl Parsable for Braced {
+    fn parse(ctx: &mut Context) -> Result<Self, Diagnostic> {
+        let open: OpenBrace = ctx.parse()?;
+        let mut tokens = TokenStream::new();
+        let mut depth = 0;
+
+        while let Some(tok) = ctx.peek() {
+            match tok.inner {
+                TokenInner::Delimeter(Delimeter::OpenBrace) => depth += 1,
+                TokenInner::Delimeter(Delimeter::ClosedBrace) => {
+                    depth -= 1;
+                    if depth == 0 {
+                        let close: ClosedBrace = ctx.parse()?;
+                        return Ok(Braced {open, tokens, close});
+                    }
+                }
+                _ => {}
+            }
+
+            // we know `next()` will return `Some()` since `peek()` was `Some()`
+            tokens.push(unsafe { ctx.next().unwrap_unchecked() })
+        }
+
+        Err(spanned_error!(open.span, "unclosed delimeter; expected closing `}}`"))
     }
 }
