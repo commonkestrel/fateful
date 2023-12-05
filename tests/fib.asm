@@ -1,6 +1,10 @@
 @org 0x0000
 @define COUNT 7
 
+@if COUNT == 8
+something
+@endif
+
 fib:
     mv r0, 0
     mv r1, 1
