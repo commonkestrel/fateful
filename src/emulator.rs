@@ -486,7 +486,7 @@ impl From<u8> for Instruction {
 use __head::InstructionHeader;
 
 /// Seperate into a module to get rid
-/// of the dead code warning that was 
+/// of the dead code warning that was
 /// driving me crazy.
 #[allow(dead_code)]
 mod __head {
