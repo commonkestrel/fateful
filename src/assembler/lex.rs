@@ -487,14 +487,14 @@ impl FromStr for Register {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_uppercase().as_str() {
-            "r0" => Ok(Register::A),
-            "r1" => Ok(Register::B),
-            "r2" => Ok(Register::C),
-            "r3" => Ok(Register::D),
-            "r4" => Ok(Register::Z),
-            "r5" => Ok(Register::S),
-            "r6" => Ok(Register::L),
-            "r7" => Ok(Register::H),
+            "r0" | "A" => Ok(Register::A),
+            "r1" | "B" => Ok(Register::B),
+            "r2" | "C" => Ok(Register::C),
+            "r3" | "D" => Ok(Register::D),
+            "r4" | "E" => Ok(Register::Z),
+            "r5" | "F" => Ok(Register::S),
+            "r6" | "H" => Ok(Register::L),
+            "r7" | "L" => Ok(Register::H),
             _ => Err(error!("unknown register")),
         }
     }
@@ -776,9 +776,7 @@ pub struct Span {
 
 impl Span {
     /// Line number for display.
-    ///
-    /// # Note
-    /// Since this is for display, 1 is added to the line index.
+    /// Starts at 1.
     pub fn line_number(&self) -> usize {
         self.line + 1
     }
