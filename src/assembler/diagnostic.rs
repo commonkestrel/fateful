@@ -147,7 +147,9 @@ impl Diagnostic {
     }
 
     pub fn as_bug(mut self) -> Self {
-        self.set_message("This is a bug. Please report this at https://github.com/commonkestrel/f8ful/issues");
+        self.set_message(
+            "This is a bug. Please report this at https://github.com/commonkestrel/f8ful/issues",
+        );
         self
     }
 
@@ -160,7 +162,7 @@ impl Diagnostic {
 
     pub fn with_help<T>(mut self, message: T) -> Self
     where
-        T: Into<String>
+        T: Into<String>,
     {
         self.children.push(Child::new(Level::Help, message));
         self
@@ -168,9 +170,10 @@ impl Diagnostic {
 
     pub fn with_spanned_help<T>(mut self, span: Arc<Span>, message: T) -> Self
     where
-        T: Into<String>
+        T: Into<String>,
     {
-        self.children.push(Child::spanned(Level::Help, message, span));
+        self.children
+            .push(Child::spanned(Level::Help, message, span));
         self
     }
 
@@ -305,9 +308,10 @@ impl fmt::Display for Diagnostic {
             )
         } else {
             let fmt = self.format_message(false);
-            let children = self.children.iter().fold(String::new(), |fold, child| {
-                fold + &format!("\n= {child}")
-            });
+            let children = self
+                .children
+                .iter()
+                .fold(String::new(), |fold, child| fold + &format!("\n= {child}"));
 
             write!(f, "{fmt}{children}")
         }
@@ -420,7 +424,7 @@ impl Child {
     #[inline]
     fn spanned<T>(level: Level, message: T, span: Arc<Span>) -> Child
     where
-        T: Into<String>
+        T: Into<String>,
     {
         Child {
             level,
@@ -457,18 +461,14 @@ fn italic_code(message: &str) -> String {
 impl fmt::Display for Child {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.level {
-            Level::Error => write!(
-                f,
-                "{}: {}", "error".red().bold(), self.message,
-            ),
-            Level::Warning => write!(
-                f,
-                "{}: {}", "warning".yellow().bold(), self.message,
-            ),
+            Level::Error => write!(f, "{}: {}", "error".red().bold(), self.message,),
+            Level::Warning => write!(f, "{}: {}", "warning".yellow().bold(), self.message,),
             Level::Note => write!(f, "{}: {}", "note".bold(), self.message),
             Level::Help => write!(
                 f,
-                "{}: {}", "help".truecolor(150, 150, 255).bold(), self.message,
+                "{}: {}",
+                "help".truecolor(150, 150, 255).bold(),
+                self.message,
             ),
         }
     }

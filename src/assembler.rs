@@ -3,14 +3,15 @@
 //! Will be completed once I actually fix the assembler.
 
 mod ascii;
+mod assemble;
 mod diagnostic;
 mod eval;
+mod include;
 mod lex;
 mod parse;
 mod token;
-mod assemble;
-pub use diagnostic::{Diagnostic, OptionalScream, ResultScream};
 use crate::error;
+pub use diagnostic::{Diagnostic, OptionalScream, ResultScream};
 
 use std::sync::OnceLock;
 
@@ -55,8 +56,13 @@ pub async fn assemble(
     let parsed = parse::parse(lexed)?;
     let assembled = assemble::assemble(parsed)?;
 
-    args.output.lock().write(&assembled).map_err(|err| vec![error!("failed to write to output: {err}")])?;
-    args.output.finish().map_err(|err| vec![error!("failed to finalize output: {err}")])
+    args.output
+        .lock()
+        .write(&assembled)
+        .map_err(|err| vec![error!("failed to write to output: {err}")])?;
+    args.output
+        .finish()
+        .map_err(|err| vec![error!("failed to finalize output: {err}")])
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

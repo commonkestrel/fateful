@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use crate::{ error, spanned_error };
 use super::ascii::AsciiStr;
-use super::lex::{self, Span, Delimeter, PreProc, Punctuation, Token, TokenInner, TokenStream};
+use super::lex::{self, Delimeter, PreProc, Punctuation, Span, Token, TokenInner, TokenStream};
 use super::parse::{Context, Parsable};
 use super::Diagnostic;
+use crate::{error, spanned_error};
 
 /// A type-macro that expands to the name of the Rust type representation of a given token.
 ///
@@ -188,9 +188,16 @@ pub struct NewLine {
 impl Parsable for NewLine {
     fn parse(ctx: &mut Context) -> Result<Self, Diagnostic> {
         match ctx.next() {
-            Some(Token { span, inner: TokenInner::NewLine }) => Ok(NewLine { span }),
-            Some(tok) => Err(spanned_error!(tok.span, "expected newline, found {}", tok.inner.description())),
-            None => Err(error!("expected newline"))
+            Some(Token {
+                span,
+                inner: TokenInner::NewLine,
+            }) => Ok(NewLine { span }),
+            Some(tok) => Err(spanned_error!(
+                tok.span,
+                "expected newline, found {}",
+                tok.inner.description()
+            )),
+            None => Err(error!("expected newline")),
         }
     }
 }
