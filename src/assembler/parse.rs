@@ -6,9 +6,9 @@
 //! 3. Parse expressions and variables
 
 use super::{
-    diagnostic::Diagnostic,
-    eval,
-    lex::{self, Delimeter, PreProc, Register, Span, Token, TokenInner, TokenStream},
+    diagnostic::{Diagnostic, Reference},
+    eval, include,
+    lex::{self, Delimeter, PreProc, Punctuation, Register, Span, Token, TokenInner, TokenStream},
     token,
     token::{
         ClosedBrace, ClosedParen, Ident, Immediate, LitString, MacroVariable, NewLine, OpenBrace,
@@ -16,7 +16,7 @@ use super::{
     },
     Errors,
 };
-use crate::{assembler::lex::Punctuation, error, note, spanned_error, Token};
+use crate::{error, note, spanned_error, Token};
 
 use std::{collections::HashMap, iter, str::FromStr, sync::Arc};
 
@@ -29,12 +29,12 @@ pub struct Punctuated<T, S> {
 }
 
 impl<T, S> Punctuated<T, S> {
-    pub fn first<'a>(&'a self) -> &T {
-        // SAFETY: punctuated is guarenteed to have parsed at least one item
-        self
-            .last
-            .as_ref()
-            .unwrap_or_else(|| unsafe {&self.list.last().unwrap_unchecked().0})
+    pub fn first<'a>(&'a self) -> Option<&T> {
+        self.last.as_ref().and(self.list.last().map(|last| &last.0))
+    }
+
+    pub fn len(&self) -> usize {
+        self.list.len() + if self.last.is_some() { 1 } else { 0 }
     }
 
     pub fn values(self) -> Vec<T> {
@@ -50,43 +50,39 @@ impl<T, S> Punctuated<T, S> {
     }
 }
 
-impl<T, S> Parsable for Punctuated<T, S>
-where
-    T: Parsable,
-    S: Parsable,
-{
-    fn parse(ctx: &mut Context) -> Result<Self, Diagnostic> {
+macro_rules! punctuated {
+    ($ctx:expr) => {
+        punctuated!($ctx, $crate::assembler::lex::TokenInner::NewLine)
+    };
+    ($ctx:expr, $end:pat) => {{
         let mut list = Vec::new();
         let mut item = None;
 
         loop {
+            match $ctx.peek() {
+                Some(Token {
+                    span: _,
+                    inner: $end,
+                })
+                | None => break,
+                _ => {}
+            }
+
             match item {
                 Some(it) => {
-                    let seperator = ctx.parse()?;
+                    let seperator = $ctx.parse()?;
                     list.push((it, seperator));
                     item = None;
                 }
                 None => {
-                    let next = ctx.parse()?;
+                    let next = $ctx.parse()?;
                     item = Some(next);
                 }
             }
-
-            match ctx.peek() {
-                Some(Token {
-                    span: _,
-                    inner: TokenInner::NewLine,
-                }) => {
-                    ctx.position += 1;
-                    break;
-                }
-                None => break,
-                _ => {}
-            }
         }
 
-        Ok(Self { list, last: item })
-    }
+        Ok(Punctuated { list, last: item })
+    }};
 }
 
 #[derive(Debug)]
@@ -190,11 +186,11 @@ pub struct CSeg {
 
 #[derive(Debug)]
 pub struct Context {
-    code: Vec<CSeg>,
-    data: Vec<DSeg>,
+    pub code: Vec<CSeg>,
+    pub data: Vec<DSeg>,
     current_segment: Segment,
-    defines: HashMap<String, TokenStream>,
-    macros: HashMap<String, Macro>,
+    pub defines: HashMap<String, TokenStream>,
+    pub macros: HashMap<String, Macro>,
     stream: TokenStream,
     position: usize,
 }
@@ -239,7 +235,9 @@ impl Parsable for ExpTok {
 
             Ok(ExpTok::Label(Label { name, colon, nl }))
         } else {
-            let args = ctx.parse()?;
+            let args = punctuated!(ctx)?;
+            // we know there's a newline at the end, so we can just skip it
+            ctx.position += 1;
 
             Ok(ExpTok::Instruction(Inst { name, args }))
         }
@@ -283,8 +281,8 @@ pub fn parse(mut stream: TokenStream) -> Result<Context, Errors> {
         }
         .to_owned();
 
-        if let Err(err) = expand_preproc(tok, &mut ctx) {
-            errors.push(err);
+        if let Err(mut err) = expand_preproc(tok, &mut ctx) {
+            errors.append(&mut err);
         }
     }
 
@@ -295,28 +293,33 @@ pub fn parse(mut stream: TokenStream) -> Result<Context, Errors> {
     }
 }
 
-fn expand_preproc(peek: Token, ctx: &mut Context) -> Result<(), Diagnostic> {
+fn expand_preproc(peek: Token, ctx: &mut Context) -> Result<(), Errors> {
     use TokenInner as TI;
     match peek.inner {
         TI::Ident(lex::Ident::PreProc(PreProc::Define)) => {
-            let def: Define = ctx.parse()?;
+            let def: Define = ctx.parse().map_err(|err| Into::<Errors>::into(err))?;
             ctx.defines.insert(def.name, def.value);
         }
-        TI::Ident(lex::Ident::PreProc(PreProc::If)) => eval_if(ctx)?,
+        TI::Ident(lex::Ident::PreProc(PreProc::If)) => {
+            eval_if(ctx).map_err(|err| Into::<Errors>::into(err))?
+        }
         TI::Ident(lex::Ident::PreProc(PreProc::Org)) => {
-            let origin: Org = ctx.parse()?;
-            if ctx.current_segment.org().is_some() {
-                return Err(
-                    spanned_error!(origin.span, "Duplicate definitions of origin")
-                        .with_help("`@org` can only be used once per section"),
-                );
+            let origin: Org = ctx.parse().map_err(|err| Into::<Errors>::into(err))?;
+            if let Some(org) = ctx.current_segment.org() {
+                return Err(Diagnostic::referencing_error(
+                    origin.span,
+                    "duplicate definitions of origin",
+                    Reference::new(org.span.clone(), "origin originally defined here"),
+                )
+                .with_help("`@org` can only be used once per section")
+                .into());
             } else {
                 *ctx.current_segment.org() = Some(origin.address);
             }
         }
         TI::Ident(lex::Ident::PreProc(PreProc::Cseg)) => {
             let mut segment = Segment::CSeg(CSeg {
-                cseg: Some(ctx.parse()?),
+                cseg: Some(ctx.parse().map_err(|err| Into::<Errors>::into(err))?),
                 org: None,
                 tokens: Vec::new(),
             });
@@ -330,7 +333,7 @@ fn expand_preproc(peek: Token, ctx: &mut Context) -> Result<(), Diagnostic> {
         }
         TI::Ident(lex::Ident::PreProc(PreProc::Dseg)) => {
             let mut segment = Segment::DSeg(DSeg {
-                dseg: ctx.parse()?,
+                dseg: ctx.parse().map_err(|err| Into::<Errors>::into(err))?,
                 org: None,
                 variables: HashMap::new(),
             });
@@ -343,15 +346,28 @@ fn expand_preproc(peek: Token, ctx: &mut Context) -> Result<(), Diagnostic> {
             }
         }
         TI::Ident(lex::Ident::PreProc(PreProc::Macro)) => {
-            let mac: Macro = ctx.parse()?;
+            let mac: Macro = ctx.parse().map_err(|err| Into::<Errors>::into(err))?;
             let name = mac.name.clone();
-            if let Some(_) = ctx.macros.insert(mac.name.value.to_owned(), mac) {
-                return Err(spanned_error!(
+            if let Some(first) = ctx.macros.insert(mac.name.value.to_owned(), mac) {
+                return Err(Diagnostic::referencing_error(
                     name.span,
-                    "duplicate definitions of macro `{}`",
-                    name.value
-                ));
+                    format!("duplicate definitions of macro `{}`", name.value),
+                    Reference::new(first.name.span, "macro originally defined here"),
+                )
+                .into());
             }
+        }
+        TI::Ident(lex::Ident::PreProc(PreProc::Include)) => {
+            let start = ctx.position;
+            ctx.position += 1;
+            let path = ctx.parse().map_err(|err| Into::<Errors>::into(err))?;
+            let _: NewLine = ctx.parse().map_err(|err| Into::<Errors>::into(err))?;
+
+            let tokens: TokenStream =
+                include::include(path).map_err(|err| Into::<Errors>::into(err))?;
+            ctx.stream.splice(start..ctx.position, tokens);
+
+            ctx.position = start;
         }
         _ => ctx.position += 1,
     }
@@ -735,7 +751,18 @@ impl MacroDef {
 
     fn parse_inputs(ctx: &mut Context) -> Result<Vec<Parameter>, Diagnostic> {
         let paren: OpenParen = ctx.parse()?;
+
         let mut params: Vec<Parameter> = Vec::new();
+        if matches!(
+            ctx.peek(),
+            Some(Token {
+                span: _,
+                inner: TokenInner::Delimeter(Delimeter::ClosedParen)
+            })
+        ) {
+            ctx.position += 1;
+            return Ok(params);
+        }
 
         while ctx.peek().is_some() {
             let var: MacroVariable = ctx.parse()?;
@@ -815,7 +842,7 @@ impl Parsable for Macro {
     fn parse(ctx: &mut Context) -> Result<Self, Diagnostic> {
         let proc: Token![@macro] = ctx.parse()?;
         let name: Ident = ctx.parse()?;
-        let bracket: OpenBrace = ctx.parse()?;
+        let brace: OpenBrace = ctx.parse()?;
         let _nl: NewLine = ctx.parse()?;
 
         let mut rules = Vec::new();
@@ -841,7 +868,7 @@ impl Parsable for Macro {
         }
 
         Err(spanned_error!(
-            bracket.span,
+            brace.span,
             "unmatched delimeter; expected closing `}}`"
         ))
     }
@@ -932,7 +959,10 @@ impl Parsable for PathInner {
         if let Some(tok) = ctx.peek() {
             match tok.inner {
                 TokenInner::String(_) => return ctx.parse().map(|lit| PathInner::Quoted(lit)),
-                _ => return ctx.parse().map(|p| PathInner::Unquoted(p)),
+                _ => {
+                    return punctuated!(ctx, TokenInner::Punctuation(Punctuation::Gt))
+                        .map(|p| PathInner::Unquoted(p))
+                }
             }
         } else {
             Err(error!("expected path, found `eof`"))
