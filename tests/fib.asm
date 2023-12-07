@@ -5,6 +5,8 @@
 something
 @endif
 
+@include <macros>
+
 @macro add16 {
     (%h0:reg, %l0:reg, %h1:reg|imm, %l1:reg|imm) {
         add %l0, %l1
