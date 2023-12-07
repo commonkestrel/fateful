@@ -8,8 +8,8 @@ use super::ascii::{unescape_str, AsciiStr, UnescapeError};
 use super::diagnostic::Diagnostic;
 use super::Errors;
 use crate::error;
+use clio::{ClioPath, Input};
 use logos::{Lexer, Logos};
-use clio::{Input, ClioPath};
 
 pub type TokenStream = Vec<Token>;
 pub type LexResult = std::result::Result<TokenStream, Errors>;
@@ -86,11 +86,8 @@ pub fn lex(mut input: Input) -> LexResult {
                     multiline = false;
                 }
 
-                for (token, span) in
-                    TokenInner::lexer(&(prev_lines.clone() + &line)).spanned()
-                {
-                    let spanned =
-                        span.start + prev_lines.len()..span.end + prev_lines.len();
+                for (token, span) in TokenInner::lexer(&(prev_lines.clone() + &line)).spanned() {
+                    let spanned = span.start + prev_lines.len()..span.end + prev_lines.len();
                     let span = Arc::new(Span {
                         line: line_num,
                         range: spanned,
@@ -109,7 +106,7 @@ pub fn lex(mut input: Input) -> LexResult {
                     inner: TokenInner::NewLine,
                     span: Arc::new(Span {
                         line: line_num,
-                        range: 0..0,
+                        range: line.len()..(line.len() + 1),
                         source: Source::File(source.clone()),
                     }),
                 })
@@ -170,6 +167,15 @@ where
                 }
             }
         }
+
+        tokens.push(Token {
+            inner: TokenInner::NewLine,
+            span: Arc::new(Span {
+                line: line_num,
+                range: line.len()..(line.len() + 1),
+                source: Source::String(source.clone()),
+            }),
+        })
     }
 
     if errs.is_empty() {
@@ -373,33 +379,35 @@ impl Address {
     fn addr_bin(lex: &mut Lexer<TokenInner>) -> Result<Address, Diagnostic> {
         let slice = Address::trim(lex)?;
 
-        Ok(Address::Immediate(u16::from_str_radix(&slice, 2).map_err(|err| {
-            error!("address must be a valid 16-bit integer: {err}")
-        })?))
+        Ok(Address::Immediate(u16::from_str_radix(&slice, 2).map_err(
+            |err| error!("address must be a valid 16-bit integer: {err}"),
+        )?))
     }
 
     fn addr_oct(lex: &mut Lexer<TokenInner>) -> Result<Address, Diagnostic> {
         let slice = Address::trim(lex)?;
 
-        Ok(Address::Immediate(u16::from_str_radix(&slice, 8).map_err(|err| {
-            error!("address must be a valid 16-bit integer: {err}")
-        })?))
+        Ok(Address::Immediate(u16::from_str_radix(&slice, 8).map_err(
+            |err| error!("address must be a valid 16-bit integer: {err}"),
+        )?))
     }
 
     fn addr_dec(lex: &mut Lexer<TokenInner>) -> Result<Address, Diagnostic> {
         let slice = Address::trim(lex)?;
 
-        Ok(Address::Immediate(u16::from_str_radix(&slice, 10).map_err(|err| {
-            error!("address must be a valid 16-bit integer: {err}")
-        })?))
+        Ok(Address::Immediate(
+            u16::from_str_radix(&slice, 10)
+                .map_err(|err| error!("address must be a valid 16-bit integer: {err}"))?,
+        ))
     }
 
     fn addr_hex(lex: &mut Lexer<TokenInner>) -> Result<Address, Diagnostic> {
         let slice = Address::trim(lex)?;
 
-        Ok(Address::Immediate(u16::from_str_radix(&slice, 16).map_err(|err| {
-            error!("address must be a valid 16-bit integer: {err}")
-        })?))
+        Ok(Address::Immediate(
+            u16::from_str_radix(&slice, 16)
+                .map_err(|err| error!("address must be a valid 16-bit integer: {err}"))?,
+        ))
     }
 
     fn label(lex: &mut Lexer<TokenInner>) -> Result<Address, Diagnostic> {
@@ -806,6 +814,7 @@ impl Span {
                     .nth(self.line)
                     .ok_or_else(|| {
                         Diagnostic::error("Line should be fully contained in the source file")
+                            .as_bug()
                     })?
                     .map_err(|_| {
                         Diagnostic::error(format!(
@@ -822,6 +831,7 @@ impl Span {
                 .nth(self.line)
                 .ok_or_else(|| {
                     Diagnostic::error("Line should be fully contained in the source string")
+                        .as_bug()
                 })
                 .map(|line| line.to_owned()),
         }
