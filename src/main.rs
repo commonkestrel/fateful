@@ -47,10 +47,6 @@ enum Error {
 async fn main() -> Result<(), Error> {
     let cli = Args::parse();
 
-    env_logger::Builder::new()
-        .filter_level(cli.verbose.log_level_filter())
-        .init();
-
     match cli.command {
         Command::Emulate(args) => emulator::emulate(args).await?,
         Command::Deploy(args) => deploy::deploy(args).await?,
