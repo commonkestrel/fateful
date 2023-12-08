@@ -48,43 +48,32 @@
 use super::{
     diagnostic::Diagnostic,
     lex::{Delimeter, Ident, Punctuation, Span, Token, TokenInner, TokenStream},
+    parse::Parenthesized,
 };
 use crate::{error, spanned_error};
 use std::{collections::HashMap, iter::Peekable};
 use std::{fmt, slice::Iter, sync::Arc};
 
 pub fn eval_expr(
-    tokens: &[Token],
+    tokens: Parenthesized,
     defines: &HashMap<String, TokenStream>,
 ) -> Result<Token, Diagnostic> {
-    let span = match (tokens.first(), tokens.last()) {
-        (
-            Some(Token {
-                inner: TokenInner::Delimeter(Delimeter::OpenParen),
-                span: open_span,
-            }),
-            Some(Token {
-                inner: TokenInner::Delimeter(Delimeter::ClosedParen),
-                span: close_span,
-            }),
-        ) => Span {
-            line: open_span.line,
-            range: open_span.range.start..close_span.range.end,
-            source: open_span.source.clone(),
-        },
-        _ => {
-            return Err(error!(
-                "Expressions must be wrapped in a set of parentheses",
-            ))
-        }
-    };
+    let span = Arc::new(Span {
+        line: tokens.open.span.line,
+        range: tokens.open.span.start()..tokens.close.span.end(),
+        source: tokens.open.span.source.clone(),
+    });
+
+    if tokens.is_empty() {
+        return Err(spanned_error!(span, "empty expression").with_help("expressions must evaluate to a number"));
+    }
 
     #[cfg(test)]
-    println!("{}", Tree::parse(tokens, defines)?);
+    println!("{}", Tree::parse(&tokens, defines)?);
 
-    Tree::parse(tokens, defines).map(|tree| Token {
+    Tree::parse(&tokens, defines).map(|tree| Token {
         inner: TokenInner::Immediate(tree.eval()),
-        span: Arc::new(span),
+        span,
     })
 }
 
@@ -118,7 +107,6 @@ impl BinOp {
 #[derive(Debug, Clone, PartialEq)]
 enum Tree {
     Literal(i128),
-    Define { inner: Box<Tree> },
     Add(Box<BinOp>),
     Sub(Box<BinOp>),
     Mul(Box<BinOp>),
@@ -358,7 +346,6 @@ impl Tree {
         use Tree as T;
         match self {
             T::Literal(lit) => *lit,
-            T::Define { inner } => inner.eval(),
             T::Add(bin) => bin.left.eval() + bin.right.eval(),
             T::Sub(bin) => bin.left.eval() - bin.right.eval(),
             T::Mul(bin) => bin.left.eval() * bin.right.eval(),
@@ -386,7 +373,6 @@ impl fmt::Display for Tree {
         use Tree as T;
         match self {
             T::Literal(inner) => write!(f, "{inner}"),
-            T::Define { inner } => write!(f, "{inner}"),
             T::Add(bin) => write!(f, "({}+{})", bin.left, bin.right),
             T::Sub(bin) => write!(f, "({}-{})", bin.left, bin.right),
             T::Mul(bin) => write!(f, "({}*{})", bin.left, bin.right),
@@ -462,15 +448,7 @@ mod tests {
         };
 
         let expr = &tokens[trim_expr(&tokens)?];
-        let eval = eval_expr(expr, &defines.unwrap_or_default())?;
-
-        match eval {
-            Token {
-                span: _,
-                inner: TokenInner::Immediate(result),
-            } => Ok(result),
-            _ => unimplemented!(),
-        }
+        eval_no_paren(expr, &defines.unwrap_or_default())
     }
 
     #[test]
