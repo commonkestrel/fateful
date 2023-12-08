@@ -3,11 +3,15 @@ use super::VERBOSITY;
 use super::lex::Span;
 use super::Errors;
 
+use std::{
+    error::Error,
+    fmt,
+    sync::Arc,
+    cmp::Ordering,
+};
+
 use colored::{Color, ColoredString, Colorize};
 use once_cell::sync::Lazy;
-use std::error::Error;
-use std::fmt;
-use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 enum Location {
