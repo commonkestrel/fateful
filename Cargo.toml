@@ -1,15 +1,11 @@
 [package]
-name = "f8ful"
+name = "fateful"
 version = "0.1.0"
 edition = "2021"
 authors = ["commonkestrel"]
 license = "MIT"
 build = "build.rs"
 rust-version = "1.70.0"
-
-[[bin]]
-name = "fateful"
-path = "src/main.rs"
 
 [workspace]
 members = ["examples/advanced", "examples/multi-port", "examples/rust-peripheral"]
