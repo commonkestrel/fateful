@@ -9,7 +9,7 @@ use super::{
     diagnostic::{Diagnostic, Reference},
     eval, include,
     lex::{self, Delimeter, PreProc, Punctuation, Register, Span, Token, TokenInner, TokenStream},
-    token,
+    token::{self, OpenBracket, ClosedBracket, Address},
     token::{
         ClosedBrace, ClosedParen, Ident, Immediate, LitString, MacroVariable, NewLine, OpenBrace,
         OpenParen, Ty,
@@ -203,6 +203,18 @@ impl Context {
     fn parse<R: Parsable>(&mut self) -> Result<R, Diagnostic> {
         R::parse(self)
     }
+
+    fn skip_newline(&mut self) {
+        if matches!(
+            self.peek(),
+            Some(Token {
+                inner: TokenInner::NewLine,
+                span: _
+            })
+        ) {
+            self.position += 1;
+        }
+    }
 }
 
 impl Iterator for Context {
@@ -247,7 +259,7 @@ impl Parsable for ExpTok {
 #[derive(Debug)]
 struct Inst {
     name: Ident,
-    args: Punctuated<Token, Token![,]>,
+    args: Punctuated<Argument, Token![,]>,
 }
 
 #[derive(Debug)]
@@ -274,13 +286,7 @@ pub fn parse(mut stream: TokenStream) -> Result<Context, Errors> {
 
     let mut errors = Vec::new();
 
-    loop {
-        let tok = match ctx.peek() {
-            Some(tok) => tok,
-            None => break,
-        }
-        .to_owned();
-
+    while let Some(tok) = ctx.peek().cloned() {
         if let Err(mut err) = expand_preproc(tok, &mut ctx) {
             errors.append(&mut err);
         }
@@ -290,6 +296,20 @@ pub fn parse(mut stream: TokenStream) -> Result<Context, Errors> {
         return Err(errors);
     } else {
         Ok(ctx)
+    }
+}
+
+#[derive(Debug)]
+pub enum Argument {
+    Reg(Register),
+    Addr(Address),
+
+    Expr(Parenthesized),
+}
+
+impl Parsable for Argument {
+    fn parse(ctx: &mut Context) -> Result<Self, Diagnostic> {
+        todo!()
     }
 }
 
@@ -636,11 +656,6 @@ pub enum RegImm {
     Immediate(u8),
 }
 
-pub enum Address {
-    Literal(u16),
-    Label(Ident),
-}
-
 bitflags! {
     #[repr(transparent)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -842,78 +857,131 @@ impl Parsable for Macro {
     fn parse(ctx: &mut Context) -> Result<Self, Diagnostic> {
         let proc: Token![@macro] = ctx.parse()?;
         let name: Ident = ctx.parse()?;
-        let brace: OpenBrace = ctx.parse()?;
-        let _nl: NewLine = ctx.parse()?;
 
         let mut rules = Vec::new();
 
-        while let Some(tok) = ctx.peek() {
-            use TokenInner as TI;
-            match tok.inner {
-                TI::Delimeter(Delimeter::OpenParen) => rules.push(ctx.parse()?),
-                TI::Delimeter(Delimeter::ClosedBrace) => {
-                    let _close: ClosedBrace = ctx.parse()?;
-                    let _nl: NewLine = ctx.parse()?;
-                    return Ok(Macro { name, rules });
-                }
-                TI::NewLine => ctx.position += 1,
-                _ => {
-                    return Err(spanned_error!(
-                        tok.span.clone(),
-                        "expected start of rule definition or end of macro, found {}",
-                        tok.inner.description()
-                    ))
-                }
+        match ctx.peek() {
+            Some(Token{ inner: TokenInner::Delimeter(Delimeter::OpenParen), span }) => {
+                rules.push(ctx.parse()?);
+                Ok(Macro { name, rules })
             }
-        }
+            Some(Token { inner: TokenInner::Delimeter(Delimeter::OpenBrace), span }) => {
+                let brace: OpenBrace = ctx.parse()?;
+                ctx.skip_newline();
 
-        Err(spanned_error!(
-            brace.span,
-            "unmatched delimeter; expected closing `}}`"
-        ))
-    }
-}
-
-#[derive(Debug)]
-struct Braced {
-    open: OpenBrace,
-    tokens: TokenStream,
-    close: ClosedBrace,
-}
-
-impl Parsable for Braced {
-    fn parse(ctx: &mut Context) -> Result<Self, Diagnostic> {
-        let open: OpenBrace = ctx.parse()?;
-        let mut tokens = TokenStream::new();
-        let mut depth = 1;
-
-        while let Some(tok) = ctx.peek() {
-            match tok.inner {
-                TokenInner::Delimeter(Delimeter::OpenBrace) => depth += 1,
-                TokenInner::Delimeter(Delimeter::ClosedBrace) => {
-                    depth -= 1;
-                    if depth == 0 {
-                        let close: ClosedBrace = ctx.parse()?;
-                        return Ok(Braced {
-                            open,
-                            tokens,
-                            close,
-                        });
+                while let Some(tok) = ctx.peek() {
+                    use TokenInner as TI;
+                    match tok.inner {
+                        TI::Delimeter(Delimeter::OpenParen) => rules.push(ctx.parse()?),
+                        TI::Delimeter(Delimeter::ClosedBrace) => {
+                            let _close: ClosedBrace = ctx.parse()?;
+                            let _nl: NewLine = ctx.parse()?;
+                            return Ok(Macro { name, rules });
+                        }
+                        TI::NewLine => ctx.position += 1,
+                        _ => {
+                            return Err(spanned_error!(
+                                tok.span.clone(),
+                                "expected start of rule definition or end of macro, found {}",
+                                tok.inner.description()
+                            ))
+                        }
                     }
                 }
-                _ => {}
+
+                Err(spanned_error!(
+                    brace.span,
+                    "unmatched delimeter; expected closing `}}`"
+                ))
             }
-
-            // we know `next()` will return `Some()` since `peek()` was `Some()`
-            tokens.push(unsafe { ctx.next().unwrap_unchecked() })
+            Some(tok) => Err(Diagnostic::referencing_error(
+                tok.span.clone(),
+                format!(
+                    "expected argument definition or rule definition, found {}",
+                    tok.inner.description()
+                ),
+                Reference::new(proc.span, "expected as part of this macro"),
+            )),
+            None => Err(error!("expected argument definition or rule defninition, found `eof`")),
         }
-
-        Err(spanned_error!(
-            open.span,
-            "unclosed delimeter; expected closing `}}`"
-        ))
     }
 }
+
+macro_rules! wrapped {
+    ($name:ident, $open_token:pat => $open:ident, $close_token:pat => $close:ident, $closing:literal $(,)?) => {
+        #[derive(Debug)]
+        pub struct $name {
+            pub open: $open,
+            pub tokens: TokenStream,
+            pub close: $close,
+        }
+
+        impl Parsable for $name {
+            fn parse(ctx: &mut Context) -> Result<Self, Diagnostic> {
+                let open: $open = ctx.parse()?;
+                let mut tokens = TokenStream::new();
+                let mut depth = 1;
+
+                while let Some(tok) = ctx.peek() {
+                    match tok.inner {
+                        $open_token => depth += 1,
+                        $close_token => {
+                            depth -= 1;
+                            if depth == 0 {
+                                let close: $close = ctx.parse()?;
+                                return Ok($name {
+                                    open,
+                                    tokens,
+                                    close,
+                                });
+                            }
+                        },
+                        _ => {},
+                    }
+
+                    // we know `next()` will return `Some()` since `peek()` was `Some()`
+                    tokens.push(unsafe { ctx.next().unwrap_unchecked() });
+                }
+
+                Err(spanned_error!(
+                    open.span,
+                    concat!("unclosed delimeter; expected closing `", $closing, "`")
+                ))
+            }
+        }
+
+        impl std::ops::Deref for $name {
+            type Target = [Token];
+        
+            fn deref(&self) -> &Self::Target {
+                &self.tokens
+            }
+        }
+    }
+}
+
+wrapped!(
+    Braced,
+    TokenInner::Delimeter(Delimeter::OpenBrace) => OpenBrace,
+    TokenInner::Delimeter(Delimeter::ClosedBrace) => ClosedBrace,
+    "}}"
+);
+
+
+
+wrapped!(
+    Parenthesized,
+    TokenInner::Delimeter(Delimeter::OpenParen) => OpenParen,
+    TokenInner::Delimeter(Delimeter::ClosedParen) => ClosedParen,
+    ")",
+);
+
+wrapped!(
+    Bracketed,
+    TokenInner::Delimeter(Delimeter::OpenBracket) => OpenBracket,
+    TokenInner::Delimeter(Delimeter::ClosedBracket) => ClosedBracket,
+    "]",
+);
 
 pub struct Path {
     open: Token![<],
