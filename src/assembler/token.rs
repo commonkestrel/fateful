@@ -175,8 +175,6 @@ parsable! {
 parsable! {
     integer literal; match Immediate(value) => Immediate{pub value: i128},
     string literal; match String(value) => LitString{pub value: AsciiStr},
-    character literal; match Char(ascii) => Char{pub ascii: u8},
-    address; match Address(addr) => Address{pub addr: super::lex::Address},
     doc string; match Doc(md) => Doc{pub md: String},
 }
 

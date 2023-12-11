@@ -55,7 +55,7 @@ use std::{collections::HashMap, iter::Peekable};
 use std::{fmt, slice::Iter, sync::Arc};
 
 pub fn eval_expr(
-    tokens: Parenthesized,
+    tokens: Parenthesized<TokenStream>,
     defines: &HashMap<String, TokenStream>,
 ) -> Result<Token, Diagnostic> {
     let span = Arc::new(Span {
@@ -65,7 +65,8 @@ pub fn eval_expr(
     });
 
     if tokens.is_empty() {
-        return Err(spanned_error!(span, "empty expression").with_help("expressions must evaluate to a number"));
+        return Err(spanned_error!(span, "empty expression")
+            .with_help("expressions must evaluate to a number"));
     }
 
     #[cfg(test)]

@@ -21,7 +21,6 @@ pub fn include(path: Path) -> Result<TokenStream, Errors> {
         PathInner::Unquoted(p) => {
             let locator = p
                 .values()
-                .iter()
                 .map(|val| val.value.as_str())
                 .collect::<Vec<&str>>()
                 .join("/");

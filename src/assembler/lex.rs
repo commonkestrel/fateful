@@ -24,8 +24,6 @@ impl TokenInner {
     pub const fn description(&self) -> &'static str {
         use TokenInner as TI;
         match self {
-            TI::Address(_) => "address",
-            TI::Char(_) => "character",
             TI::Delimeter(delim) => delim.description(),
             TI::Doc(_) => "doc string",
             TI::Ident(ref ident) => ident.description(),
@@ -194,23 +192,14 @@ pub enum TokenInner {
     #[regex(r"0o[0-7][_0-7]*", TokenInner::octal)]
     #[regex(r"-?[0-9][_0-9]*", TokenInner::decimal)]
     #[regex(r"0x[0-9a-fA-F][_0-9a-fA-F]*", TokenInner::hexadecimal)]
+    #[regex(r"'[\x00-\x7F]*'", TokenInner::char)]
+    #[regex(r#"'\\[(\\)n"at0rbfv]'"#, TokenInner::char)]
+    #[regex(r"'\\x[[:xdigit:]]{1,2}'", TokenInner::char)]
     Immediate(i128),
 
     #[regex(r#""((\\")|[\x00-\x21\x23-\x7F])*""#, TokenInner::string)]
     #[regex(r##"r#"((\\")|[\x00-\x21\x23-\x7F])*"#"##, TokenInner::raw_string)]
     String(AsciiStr),
-
-    #[regex(r"'[\x00-\x7F]*'", TokenInner::char)]
-    #[regex(r#"'\\[(\\)n"at0rbfv]'"#, TokenInner::char)]
-    #[regex(r"'\\x[[:xdigit:]]{1,2}'", TokenInner::char)]
-    Char(u8),
-
-    #[regex(r"\[0b[01][_01]*\]", Address::addr_bin)]
-    #[regex(r"\[0o[0-7][_0-7]*\]", Address::addr_oct)]
-    #[regex(r"\[[0-9][_0-9]*\]", Address::addr_dec)]
-    #[regex(r"\[0x[0-9a-fA-F][_0-9a-fA-F]*\]", Address::addr_hex)]
-    #[regex(r"\[[._a-zA-Z][_a-zA-Z0-9]*\]", Address::label)]
-    Address(Address),
 
     #[regex(r"[._a-zA-Z][_a-zA-Z0-9]*", Ident::any)]
     #[regex(r"@[_a-zA-Z][_a-zA-Z0-9]*", Ident::pre_proc)]
@@ -326,9 +315,9 @@ impl TokenInner {
         })?)
     }
 
-    fn char(lex: &mut Lexer<TokenInner>) -> Result<u8, Diagnostic> {
+    fn char(lex: &mut Lexer<TokenInner>) -> Result<i128, Diagnostic> {
         let slice = lex.slice();
-        Self::char_from_str(slice)
+        Self::char_from_str(slice).map(|c| c.into())
     }
 
     fn char_from_str(s: &str) -> Result<u8, Diagnostic> {
@@ -356,62 +345,6 @@ impl TokenInner {
             .ok_or_else(|| Diagnostic::error("doc comment does not start with `///`"))?
             .trim()
             .to_owned())
-    }
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub enum Address {
-    Immediate(u16),
-    Label(String),
-}
-
-impl Address {
-    fn trim(lex: &mut Lexer<TokenInner>) -> Result<String, Diagnostic> {
-        Ok(lex
-            .slice()
-            .strip_prefix("[")
-            .ok_or_else(|| error!("address does not start with `[`"))?
-            .strip_suffix("]")
-            .ok_or_else(|| error!("address does not end with `]`"))?
-            .replace("_", ""))
-    }
-
-    fn addr_bin(lex: &mut Lexer<TokenInner>) -> Result<Address, Diagnostic> {
-        let slice = Address::trim(lex)?;
-
-        Ok(Address::Immediate(u16::from_str_radix(&slice, 2).map_err(
-            |err| error!("address must be a valid 16-bit integer: {err}"),
-        )?))
-    }
-
-    fn addr_oct(lex: &mut Lexer<TokenInner>) -> Result<Address, Diagnostic> {
-        let slice = Address::trim(lex)?;
-
-        Ok(Address::Immediate(u16::from_str_radix(&slice, 8).map_err(
-            |err| error!("address must be a valid 16-bit integer: {err}"),
-        )?))
-    }
-
-    fn addr_dec(lex: &mut Lexer<TokenInner>) -> Result<Address, Diagnostic> {
-        let slice = Address::trim(lex)?;
-
-        Ok(Address::Immediate(
-            u16::from_str_radix(&slice, 10)
-                .map_err(|err| error!("address must be a valid 16-bit integer: {err}"))?,
-        ))
-    }
-
-    fn addr_hex(lex: &mut Lexer<TokenInner>) -> Result<Address, Diagnostic> {
-        let slice = Address::trim(lex)?;
-
-        Ok(Address::Immediate(
-            u16::from_str_radix(&slice, 16)
-                .map_err(|err| error!("address must be a valid 16-bit integer: {err}"))?,
-        ))
-    }
-
-    fn label(lex: &mut Lexer<TokenInner>) -> Result<Address, Diagnostic> {
-        Ok(Address::Label(Address::trim(lex)?))
     }
 }
 

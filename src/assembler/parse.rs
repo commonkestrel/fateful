@@ -8,8 +8,8 @@
 use super::{
     diagnostic::{Diagnostic, Reference},
     eval, include,
-    lex::{self, Delimeter, PreProc, Punctuation, Register, Span, Token, TokenInner, TokenStream},
-    token::{self, OpenBracket, ClosedBracket, Address},
+    lex::{self, Delimeter, PreProc, Punctuation, Span, Token, TokenInner, TokenStream},
+    token::{self, ClosedBracket, OpenBracket, Variable, Register},
     token::{
         ClosedBrace, ClosedParen, Ident, Immediate, LitString, MacroVariable, NewLine, OpenBrace,
         OpenParen, Ty,
@@ -18,7 +18,7 @@ use super::{
 };
 use crate::{error, note, spanned_error, Token};
 
-use std::{collections::HashMap, iter, str::FromStr, sync::Arc};
+use std::{collections::HashMap, iter, str::FromStr, sync::Arc, slice, option};
 
 use bitflags::bitflags;
 
@@ -37,7 +37,11 @@ impl<T, S> Punctuated<T, S> {
         self.list.len() + if self.last.is_some() { 1 } else { 0 }
     }
 
-    pub fn values(self) -> Vec<T> {
+    pub fn values(&self) -> Box<dyn Iterator<Item=&T>> {
+        Box::new(self.list.iter().map(|pair| &pair.0).chain(self.last.iter()))
+    }
+
+    pub fn into_values(self) -> Vec<T> {
         match self.last {
             Some(last) => self
                 .list
@@ -84,6 +88,104 @@ macro_rules! punctuated {
         Ok(Punctuated { list, last: item })
     }};
 }
+
+macro_rules! wrapped {
+    ($name:ident, $macro:ident, $open_token:pat => $open:ident, $close_token:pat => $close:ident, $closing:literal $(,)?) => {
+        #[derive(Debug)]
+        pub struct $name<T> {
+            pub open: $open,
+            pub inner: T,
+            pub close: $close,
+        }
+
+        macro_rules! $macro {
+            ($ctx:expr) => {(|| {
+                let open: $open = $ctx.parse()?;
+                let mut tokens = TokenStream::new();
+                let mut depth = 1;
+
+                while let Some(tok) = $ctx.peek() {
+                    match tok.inner {
+                        $open_token => depth += 1,
+                        $close_token => {
+                            depth -= 1;
+                            if depth == 0 {
+                                let close: $close = $ctx.parse()?;
+                                return Ok($name {
+                                    open,
+                                    inner: tokens,
+                                    close,
+                                });
+                            }
+                        }
+                        _ => {}
+                    }
+
+                    // we know `next()` will return `Some()` since `peek()` was `Some()`
+                    tokens.push(unsafe { $ctx.next().unwrap_unchecked() });
+                }
+
+                Err(spanned_error!(
+                    open.span,
+                    concat!("unclosed delimeter; expected closing `", $closing, "`")
+                ))
+            })()};
+            ($ctx:expr, $parsable:ty) => {{
+                let open: $open = $ctx.parse()?;
+                let inner: $parsable = $ctx.parse()?;
+                let close = match $ctx.next() {
+                    Some(Token { span, inner: $close_token }) => $close { span },
+                    Some(tok) => return Err(spanned_error!(
+                        tok.span,
+                        "",
+                    )),
+                    _ => return Err(spanned_error!(
+                        open.span,
+                        concat!("unclosed delimeter; expected closing `", $closing, "`")
+                    )),
+                };
+
+                Ok($name {
+                    open,
+                    inner,
+                    close,
+                })
+            }}
+        }
+
+        impl<T> std::ops::Deref for $name<T> {
+            type Target = T;
+
+            fn deref(&self) -> &Self::Target {
+                &self.inner
+            }
+        }
+    };
+}
+
+wrapped!(
+    Braced,
+    braced,
+    TokenInner::Delimeter(Delimeter::OpenBrace) => OpenBrace,
+    TokenInner::Delimeter(Delimeter::ClosedBrace) => ClosedBrace,
+    "}}"
+);
+
+wrapped!(
+    Parenthesized,
+    parenthesized,
+    TokenInner::Delimeter(Delimeter::OpenParen) => OpenParen,
+    TokenInner::Delimeter(Delimeter::ClosedParen) => ClosedParen,
+    ")",
+);
+
+wrapped!(
+    Bracketed,
+    bracketed,
+    TokenInner::Delimeter(Delimeter::OpenBracket) => OpenBracket,
+    TokenInner::Delimeter(Delimeter::ClosedBracket) => ClosedBracket,
+    "]",
+);
 
 #[derive(Debug)]
 enum Segment {
@@ -228,7 +330,7 @@ impl Iterator for Context {
 }
 
 #[derive(Debug)]
-enum ExpTok {
+pub enum ExpTok {
     Label(Label),
     Instruction(Inst),
 }
@@ -257,19 +359,26 @@ impl Parsable for ExpTok {
 }
 
 #[derive(Debug)]
-struct Inst {
-    name: Ident,
-    args: Punctuated<Argument, Token![,]>,
+pub struct Inst {
+    pub name: Ident,
+    pub args: Punctuated<Argument, Token![,]>,
 }
 
 #[derive(Debug)]
-struct Label {
-    name: Ident,
-    colon: Token![:],
-    nl: NewLine,
+pub struct Label {
+    pub name: Ident,
+    pub colon: Token![:],
+    pub nl: NewLine,
 }
 
-pub fn parse(mut stream: TokenStream) -> Result<Context, Errors> {
+#[derive(Debug)]
+pub struct ParseStream {
+    pub code: Vec<CSeg>,
+    pub data: Vec<DSeg>,
+    pub macros: HashMap<String, Macro>,
+}
+
+pub fn parse(mut stream: TokenStream) -> Result<ParseStream, Errors> {
     let mut ctx = Context {
         code: Vec::new(),
         data: Vec::new(),
@@ -295,21 +404,36 @@ pub fn parse(mut stream: TokenStream) -> Result<Context, Errors> {
     if !errors.is_empty() {
         return Err(errors);
     } else {
-        Ok(ctx)
+        Ok(ParseStream {
+            code: ctx.code,
+            data: ctx.data,
+            macros: ctx.macros,
+        })
     }
 }
 
 #[derive(Debug)]
 pub enum Argument {
     Reg(Register),
-    Addr(Address),
-
-    Expr(Parenthesized),
+    Immediate(Immediate),
+    Addr(Bracketed<TokenStream>),
+    Expr(Parenthesized<TokenStream>),
 }
 
 impl Parsable for Argument {
     fn parse(ctx: &mut Context) -> Result<Self, Diagnostic> {
-        todo!()
+        match ctx.peek() {
+            Some(Token { span: _, inner: TokenInner::Ident(lex::Ident::Register(_)) }) => Ok(Argument::Reg(ctx.parse()?)),
+            Some(Token { span: _, inner: TokenInner::Immediate(_) }) => Ok(Argument::Immediate(ctx.parse()?)),
+            Some(Token { span: _, inner: TokenInner::Delimeter(Delimeter::OpenBracket) }) => Ok(Argument::Addr(bracketed!(ctx)?)),
+            Some(Token { span: _, inner: TokenInner::Delimeter(Delimeter::OpenParen) }) => Ok(Argument::Expr(parenthesized!(ctx)?)),
+            Some(_) => {
+                // SAFETY: Since `peek()` returned `Some`, we know `next()` will as well
+                let next = unsafe { ctx.next().unwrap_unchecked() };
+                Err(spanned_error!(next.span, "expected argument, found {}", next.inner.description()))
+            },
+            None => Err(error!("expected argument, found `eof`")),
+        }
     }
 }
 
@@ -605,57 +729,6 @@ impl FromStr for Define {
     }
 }
 
-pub enum Instruction {
-    Add(Register, RegImm),
-    Adc(Register, RegImm),
-    Sub(Register, RegImm),
-    Sbc(Register, RegImm),
-    Nand(Register, RegImm),
-    Or(Register, RegImm),
-    Cmp(Register, RegImm),
-    Mv(Register, RegImm),
-    Ld(Register, Option<u16>),
-    St(Register, Option<u16>),
-    Lda(u16),
-    Push(RegImm),
-    Pop(Register),
-    Jnz(Address),
-    In(Register, RegImm),
-    Out(RegImm, Register),
-}
-
-impl Instruction {
-    pub fn len(&self) -> u16 {
-        use Instruction as I;
-
-        match self {
-            I::Add(_, _) => 2,
-            I::Adc(_, _) => 2,
-            I::Sub(_, _) => 2,
-            I::Sbc(_, _) => 2,
-            I::Nand(_, _) => 2,
-            I::Or(_, _) => 2,
-            I::Cmp(_, _) => 2,
-            I::Mv(_, _) => 2,
-            I::Ld(_, Some(_)) => 3,
-            I::Ld(_, None) => 1,
-            I::St(_, Some(_)) => 3,
-            I::St(_, None) => 1,
-            I::Lda(_) => 3,
-            I::Push(_) => 2,
-            I::Pop(_) => 1,
-            I::Jnz(_) => 3,
-            I::In(_, _) => 2,
-            I::Out(_, _) => 2,
-        }
-    }
-}
-
-pub enum RegImm {
-    Register(Register),
-    Immediate(u8),
-}
-
 bitflags! {
     #[repr(transparent)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -711,7 +784,6 @@ impl Parameter {
                 Some(32..=63) => self.types.contains(Types::IMM64),
                 _ => unreachable!(),
             },
-            TI::Address(_) => self.types.contains(Types::ADDR),
             TI::Ident(lex::Ident::Register(_)) => self.types.contains(Types::REG),
             TI::Ident(_) => self.types.contains(Types::LABEL),
             _ => false,
@@ -722,7 +794,7 @@ impl Parameter {
 #[derive(Debug)]
 pub struct MacroDef {
     parameters: Vec<Parameter>,
-    expansion: Braced,
+    expansion: Braced<TokenStream>,
 }
 
 impl MacroDef {
@@ -739,7 +811,7 @@ impl MacroDef {
 
     /// Must make sure that the provided parameters match this rule with [`MacroDef::fits`]
     pub fn expand(&self, parameters: &[Token]) -> Result<TokenStream, Diagnostic> {
-        let mut expanded = TokenStream::with_capacity(self.expansion.tokens.len());
+        let mut expanded = TokenStream::with_capacity(self.expansion.inner.len());
 
         let parameters: HashMap<String, &Token> = HashMap::from_iter(
             self.parameters
@@ -748,7 +820,7 @@ impl MacroDef {
                 .zip(parameters.into_iter()),
         );
 
-        for token in self.expansion.tokens.iter() {
+        for token in self.expansion.inner.iter() {
             expanded.push(match &token.inner {
                 TokenInner::Ident(lex::Ident::MacroVariable(name)) => {
                     (*parameters.get(name).ok_or(spanned_error!(
@@ -827,7 +899,7 @@ impl MacroDef {
 impl Parsable for MacroDef {
     fn parse(ctx: &mut Context) -> Result<Self, Diagnostic> {
         let inputs = Self::parse_inputs(ctx)?;
-        let expansion: Braced = ctx.parse()?;
+        let expansion: Braced<TokenStream> = braced!(ctx)?;
 
         Ok(MacroDef {
             parameters: inputs,
@@ -861,11 +933,17 @@ impl Parsable for Macro {
         let mut rules = Vec::new();
 
         match ctx.peek() {
-            Some(Token{ inner: TokenInner::Delimeter(Delimeter::OpenParen), span }) => {
+            Some(Token {
+                inner: TokenInner::Delimeter(Delimeter::OpenParen),
+                span,
+            }) => {
                 rules.push(ctx.parse()?);
                 Ok(Macro { name, rules })
             }
-            Some(Token { inner: TokenInner::Delimeter(Delimeter::OpenBrace), span }) => {
+            Some(Token {
+                inner: TokenInner::Delimeter(Delimeter::OpenBrace),
+                span,
+            }) => {
                 let brace: OpenBrace = ctx.parse()?;
                 ctx.skip_newline();
 
@@ -902,86 +980,12 @@ impl Parsable for Macro {
                 ),
                 Reference::new(proc.span, "expected as part of this macro"),
             )),
-            None => Err(error!("expected argument definition or rule defninition, found `eof`")),
+            None => Err(error!(
+                "expected argument definition or rule defninition, found `eof`"
+            )),
         }
     }
 }
-
-macro_rules! wrapped {
-    ($name:ident, $open_token:pat => $open:ident, $close_token:pat => $close:ident, $closing:literal $(,)?) => {
-        #[derive(Debug)]
-        pub struct $name {
-            pub open: $open,
-            pub tokens: TokenStream,
-            pub close: $close,
-        }
-
-        impl Parsable for $name {
-            fn parse(ctx: &mut Context) -> Result<Self, Diagnostic> {
-                let open: $open = ctx.parse()?;
-                let mut tokens = TokenStream::new();
-                let mut depth = 1;
-
-                while let Some(tok) = ctx.peek() {
-                    match tok.inner {
-                        $open_token => depth += 1,
-                        $close_token => {
-                            depth -= 1;
-                            if depth == 0 {
-                                let close: $close = ctx.parse()?;
-                                return Ok($name {
-                                    open,
-                                    tokens,
-                                    close,
-                                });
-                            }
-                        },
-                        _ => {},
-                    }
-
-                    // we know `next()` will return `Some()` since `peek()` was `Some()`
-                    tokens.push(unsafe { ctx.next().unwrap_unchecked() });
-                }
-
-                Err(spanned_error!(
-                    open.span,
-                    concat!("unclosed delimeter; expected closing `", $closing, "`")
-                ))
-            }
-        }
-
-        impl std::ops::Deref for $name {
-            type Target = [Token];
-        
-            fn deref(&self) -> &Self::Target {
-                &self.tokens
-            }
-        }
-    }
-}
-
-wrapped!(
-    Braced,
-    TokenInner::Delimeter(Delimeter::OpenBrace) => OpenBrace,
-    TokenInner::Delimeter(Delimeter::ClosedBrace) => ClosedBrace,
-    "}}"
-);
-
-
-
-wrapped!(
-    Parenthesized,
-    TokenInner::Delimeter(Delimeter::OpenParen) => OpenParen,
-    TokenInner::Delimeter(Delimeter::ClosedParen) => ClosedParen,
-    ")",
-);
-
-wrapped!(
-    Bracketed,
-    TokenInner::Delimeter(Delimeter::OpenBracket) => OpenBracket,
-    TokenInner::Delimeter(Delimeter::ClosedBracket) => ClosedBracket,
-    "]",
-);
 
 pub struct Path {
     open: Token![<],
@@ -1036,4 +1040,38 @@ impl Parsable for PathInner {
             Err(error!("expected path, found `eof`"))
         }
     }
+}
+
+#[derive(Debug)]
+pub enum Address {
+    Immediate(Immediate),
+    Variable(Variable),
+    Label(Ident),
+}
+
+impl Parsable for Address {
+    fn parse(ctx: &mut Context) -> Result<Self, Diagnostic> {
+        match ctx.peek() {
+            Some(Token { span: _, inner: TokenInner::Immediate(_) }) => Ok(Address::Immediate(ctx.parse()?)),
+            Some(Token { span: _, inner: TokenInner::Ident(lex::Ident::Variable(_)) }) => Ok(Address::Variable(ctx.parse()?)),
+            Some(Token { span: _, inner: TokenInner::Ident(lex::Ident::Ident(_)) }) => Ok(Address::Label(ctx.parse()?)),
+            Some(_) => {
+                let next = unsafe { ctx.next().unwrap_unchecked() };
+                Err(spanned_error!(next.span, "expected address, found {}", next.inner.description()))
+            },
+            None => Err(error!("expected address, found `eof`")),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum MemAddr {
+    Immediate(Immediate),
+    Variable(Variable),
+}
+
+#[derive(Debug)]
+pub enum ProgAddr {
+    Immediate(Immediate),
+    Label(Ident),
 }
