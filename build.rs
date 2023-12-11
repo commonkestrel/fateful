@@ -98,9 +98,10 @@ enum Instruction {
     Ld = 0x8,
     St = 0x9,
     Lda = 0xA,
-    Push = 0xB,
-    Pop = 0xC,
-    Jnz = 0xD,
+    Lpm = 0xB,
+    Push = 0xC,
+    Pop = 0xD,
+    Jnz = 0xE,
     Halt = 0xF,
 }
 
@@ -272,6 +273,7 @@ impl Stream {
                                 "ld:" => Instruction::Ld,
                                 "st:" => Instruction::St,
                                 "lda:" => Instruction::Lda,
+                                "lpm:" => Instruction::Lpm,
                                 "push:" => Instruction::Push,
                                 "pop:" => Instruction::Pop,
                                 "jnz:" => Instruction::Jnz,
