@@ -3,12 +3,7 @@ use super::VERBOSITY;
 use super::lex::Span;
 use super::Errors;
 
-use std::{
-    error::Error,
-    fmt,
-    sync::Arc,
-    cmp::Ordering,
-};
+use std::{cmp::Ordering, error::Error, fmt, sync::Arc};
 
 use colored::{Color, ColoredString, Colorize};
 use once_cell::sync::Lazy;
@@ -272,6 +267,49 @@ impl Diagnostic {
         }
     }
 
+    fn format_spanned(&self, f: &mut fmt::Formatter<'_>, span: &Span) -> fmt::Result {
+        let line = span.line().unwrap_or_scream();
+
+        // Length of the number when converted to decimal, plus one for padding.
+        let spaces = (span.line_number().ilog10() + 2) as usize;
+
+        let description = format!(
+            "{cap:>width$}\n\
+                {n} {line}\n\
+                {cap:>width$}{pointer}\
+            ",
+            n = format!("{n:<spaces$}|", n = span.line_number())
+                .cyan()
+                .bold(),
+            cap = Lazy::force(&BLUE_PIPE),
+            width = spaces + 1,
+            pointer = format!(
+                "{blank:>start$}{blank:^>end$}",
+                blank = "",
+                start = span.start() + 1,
+                end = span.end() - span.start(),
+            )
+            .color(self.level.color())
+        );
+
+        let children = self.children.iter().fold("\n".to_string(), |fold, child| {
+            fold + &format!("{:>width$} {}\n", "=", child, width = spaces + 1)
+        });
+
+        write!(
+            f,
+            "{}\n{arrow:>width$} {}:{}:{}\n{}{}",
+            self.format_message(true),
+            span.source(),
+            span.line_number(),
+            span.start(),
+            description,
+            children,
+            arrow = Lazy::force(&BLUE_ARROW),
+            width = spaces + 2,
+        )
+    }
+
     #[cold]
     #[track_caller]
     pub fn scream(self) -> ! {
@@ -292,121 +330,120 @@ impl Into<Errors> for Diagnostic {
 impl fmt::Display for Diagnostic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.location {
-            Some(Location::Span(ref span)) => {
-                let line = span.line().unwrap_or_scream();
-
-                // Length of the number when converted to decimal, plus one for padding.
-                let spaces = (span.line_number().ilog10() + 2) as usize;
-
-                let description = format!(
-                    "{cap:>width$}\n\
-                     {n} {line}\n\
-                     {cap:>width$}{pointer}\
-                    ",
-                    n = format!("{n:<spaces$}|", n = span.line_number())
-                        .cyan()
-                        .bold(),
-                    cap = Lazy::force(&BLUE_PIPE),
-                    width = spaces + 1,
-                    pointer = format!(
-                        "{blank:>start$}{blank:^>end$}",
-                        blank = "",
-                        start = span.start() + 1,
-                        end = span.end() - span.start(),
-                    )
-                    .color(self.level.color())
-                );
-
-                let children = self.children.iter().fold("\n".to_string(), |fold, child| {
-                    fold + &format!("{:>width$} {}\n", "=", child, width = spaces + 1)
-                });
-
-                write!(
-                    f,
-                    "{}\n{arrow:>width$} {}:{}:{}\n{}{}",
-                    self.format_message(true),
-                    span.source(),
-                    span.line_number(),
-                    span.start(),
-                    description,
-                    children,
-                    arrow = Lazy::force(&BLUE_ARROW),
-                    width = spaces + 2,
-                )
-            }
+            Some(Location::Span(ref span)) => self.format_spanned(f, span),
             Some(Location::Reference(ref span, ref reference)) => {
                 let origin = span.line().unwrap_or_scream();
                 let ref_origin = reference.span.line().unwrap_or_scream();
 
-                // Length of the number when converted to decimal, plus one for padding.
-                let spaces = (span.line_number().ilog10() + 2)
-                    .max(reference.span.line_number().ilog10() + 2)
-                    as usize;
+                if span.source == reference.span.source {
+                    // Length of the number when converted to decimal, plus one for padding.
+                    let spaces = (span.line_number().ilog10() + 2)
+                        .max(reference.span.line_number().ilog10() + 2)
+                        as usize;
 
-                // TODO: Split pointers if the spans point to differen files.
-                let seperator = if span.line.abs_diff(reference.span.line) > 1 {
-                    format!(
-                        "...{blank:>start$}{blank:->end$} {}",
-                        reference.message,
-                        blank = "",
-                        start = reference.span.start() + spaces - 1,
-                        end = reference.span.end() - reference.span.start()
+                    let seperator = if span.line.abs_diff(reference.span.line) > 1 {
+                        format!(
+                            "...{blank:>start$}{blank:->end$} {}",
+                            reference.message,
+                            blank = "",
+                            start = reference.span.start() + spaces - 1,
+                            end = reference.span.end() - reference.span.start()
+                        )
+                    } else {
+                        format!(
+                            "{cap:>spaces$}{blank:>start$}{blank:->end$} {}",
+                            reference.message,
+                            cap = Lazy::force(&BLUE_PIPE),
+                            blank = "",
+                            start = reference.span.start() + 1,
+                            end = reference.span.end() - reference.span.start()
+                        )
+                    }
+                    .cyan()
+                    .bold();
+
+                    let description = format!(
+                        "{cap:>width$}\n\
+                        {refn} {ref_origin}\n\
+                        {seperator}\n\
+                        {n} {origin}\n\
+                        {cap:>width$}{pointer}\
+                        ",
+                        width = spaces + 1,
+                        n = format!("{n:<spaces$}|", n = span.line_number())
+                            .cyan()
+                            .bold(),
+                        refn = format!("{n:<spaces$}|", n = reference.span.line_number())
+                            .cyan()
+                            .bold(),
+                        cap = Lazy::force(&BLUE_PIPE),
+                        pointer = format!(
+                            "{blank:>start$}{blank:^>end$}",
+                            blank = "",
+                            start = span.start() + 1,
+                            end = span.end() - span.start(),
+                        )
+                        .color(self.level.color())
+                    );
+
+                    let children = self.children.iter().fold("\n".to_string(), |fold, child| {
+                        fold + &format!("{:>spaces$} {}\n", "=", child)
+                    });
+
+                    let error = self.format_message(true);
+
+                    write!(
+                        f,
+                        "{}\n{arrow:>width$} {}:{}:{}\n{}{}",
+                        self.format_message(true),
+                        span.source(),
+                        span.line_number(),
+                        span.start(),
+                        description,
+                        children,
+                        arrow = Lazy::force(&BLUE_ARROW),
+                        width = spaces + 2,
                     )
                 } else {
-                    format!(
-                        "{cap:>spaces$}{blank:>start$}{blank:->end$} {}",
-                        reference.message,
+                    self.format_spanned(f, span)?;
+
+                    let line = reference.span.line().unwrap_or_scream();
+
+                    // Length of the number when converted to decimal, plus one for padding.
+                    let spaces = (reference.span.line_number().ilog10() + 2) as usize;
+
+                    let description = format!(
+                        "{cap:>width$}\n\
+                            {n} {line}\n\
+                            {cap:>width$}{pointer}\
+                        ",
+                        n = format!("{n:<spaces$}|", n = span.line_number())
+                            .cyan()
+                            .bold(),
                         cap = Lazy::force(&BLUE_PIPE),
-                        blank = "",
-                        start = reference.span.start() + 1,
-                        end = reference.span.end() - reference.span.start()
+                        width = spaces + 1,
+                        pointer = format!(
+                            "{blank:>start$}{blank:^>end$}",
+                            blank = "",
+                            start = span.start() + 1,
+                            end = span.end() - span.start(),
+                        )
+                        .cyan()
+                    );
+
+                    write!(
+                        f,
+                        "{} {}\n{arrow:>width$} {}:{}:{}\n{}",
+                        "info:".cyan(),
+                        reference.message,
+                        reference.span.source(),
+                        reference.span.line_number(),
+                        reference.span.start(),
+                        description,
+                        arrow = Lazy::force(&BLUE_ARROW),
+                        width = spaces + 2,
                     )
                 }
-                .cyan()
-                .bold();
-
-                let description = format!(
-                    "{cap:>width$}\n\
-                     {refn} {ref_origin}\n\
-                     {seperator}\n\
-                     {n} {origin}\n\
-                     {cap:>width$}{pointer}\
-                    ",
-                    width = spaces + 1,
-                    n = format!("{n:<spaces$}|", n = span.line_number())
-                        .cyan()
-                        .bold(),
-                    refn = format!("{n:<spaces$}|", n = reference.span.line_number())
-                        .cyan()
-                        .bold(),
-                    cap = Lazy::force(&BLUE_PIPE),
-                    pointer = format!(
-                        "{blank:>start$}{blank:^>end$}",
-                        blank = "",
-                        start = span.start() + 1,
-                        end = span.end() - span.start(),
-                    )
-                    .color(self.level.color())
-                );
-
-                let children = self.children.iter().fold("\n".to_string(), |fold, child| {
-                    fold + &format!("{:>spaces$} {}\n", "=", child)
-                });
-
-                let error = self.format_message(true);
-
-                write!(
-                    f,
-                    "{}\n{arrow:>width$} {}:{}:{}\n{}{}",
-                    self.format_message(true),
-                    span.source(),
-                    span.line_number(),
-                    span.start(),
-                    description,
-                    children,
-                    arrow = Lazy::force(&BLUE_ARROW),
-                    width = spaces + 2,
-                )
             }
             Some(Location::Panic {
                 ref path,
