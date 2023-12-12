@@ -259,6 +259,8 @@ bitflags! {
         const AHI = 1 << 20;
         /// Load Stack Pointer
         const LSP = 1 << 21;
+        /// Load Program Memory
+        const LPM = 1 << 22;
         /// Set Halt
         const SH = 1 << 22;
     }
@@ -485,9 +487,8 @@ impl From<u8> for Instruction {
 
 use __head::InstructionHeader;
 
-/// Seperate into a module to get rid
-/// of the dead code warning that was
-/// driving me crazy.
+/// Seperated into a seperate module to get rid of
+/// the dead code warning that was driving me crazy.
 #[allow(dead_code)]
 mod __head {
     use super::*;
@@ -627,6 +628,8 @@ impl State {
             }
         } else if cw.contains(ControlWord::PO) {
             program_byte
+        } else if cw.contains(ControlWord::LPM) {
+            self.program[self.addr as usize]
         } else {
             0x00
         };

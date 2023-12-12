@@ -179,8 +179,10 @@ bitflags! {
         const AHI = 1 << 20;
         /// Load Stack Pointer
         const LSP = 1 << 21;
+        /// Load Program Memory
+        const LPM = 1 << 22;
         /// Set Halt
-        const SH = 1 << 22;
+        const SH = 1 << 23;
     }
 }
 
@@ -211,6 +213,7 @@ impl FromStr for ControlWord {
             "ali" => Ok(ControlWord::ALI),
             "ahi" => Ok(ControlWord::AHI),
             "lsp" => Ok(ControlWord::LSP),
+            "lpm" => Ok(ControlWord::LPM),
             "sh" => Ok(ControlWord::SH),
             _ => Err(Error::UnknownFlag(s.to_owned())),
         }

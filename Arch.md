@@ -22,7 +22,7 @@ It is layed out like so:
 |-----------|-------|-------|-------|-------|-------|-------|-------|-------|
 | Low Byte  | `RSP` | `RSB` | `RBO` | `RBI` |  `AO` | `AOH` | `AOM` | `AOL` |
 | Mid Byte  |  `SR` |  `PO` |  `LI` | `JNZ` | `PCI` |  `CR` | `SPD` | `SPI` |
-| High Byte |  ` `  |  `SH`  | `LSP` | `AHI` | `ALI` |  `SA` |  `LA` | `THL` |
+| High Byte |  `SH` | `LPM` | `LSP` | `AHI` | `ALI` |  `SA` |  `LA` | `THL` |
 
 ### ALU Opcode
 
@@ -80,6 +80,7 @@ These operations are listed here:
 - `ALI` (Address Low In): Loads the contents of the bus into the low byte of the Address Register.
 - `AHI` (Address High In): Loads the contents of the bus into the high byte of the Address Register.
 - `LSP` (Load Stack Pointer): Loads the Stack Pointer into the Address Register.
+- `LPM` (Load Program Memory): Loads the
 - `SH` (Set Halt): Sets the Halt (`H`) bit in the Status Register
 
 ## Memory
