@@ -685,7 +685,9 @@ impl State {
         if cw.contains(ControlWord::THL | ControlWord::RBO) {
             self.addr = ((self.bank.h as u16) << 8) | (self.bank.l as u16);
         } else if cw.contains(ControlWord::THL | ControlWord::RBI) {
-            let addr = self.addr.ilog2();
+            let addr = self.addr.to_be_bytes();
+            self.bank.h = addr[0];
+            self.bank.l = addr[1];
         }
 
         if cw.contains(ControlWord::SPI) {
