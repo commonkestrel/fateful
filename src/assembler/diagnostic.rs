@@ -3,7 +3,7 @@ use super::VERBOSITY;
 use super::lex::Span;
 use super::Errors;
 
-use std::{cmp::Ordering, error::Error, fmt, sync::Arc};
+use std::{error::Error, fmt, sync::Arc};
 
 use colored::{Color, ColoredString, Colorize};
 use once_cell::sync::Lazy;
@@ -390,8 +390,6 @@ impl fmt::Display for Diagnostic {
                         fold + &format!("{:>spaces$} {}\n", "=", child)
                     });
 
-                    let error = self.format_message(true);
-
                     write!(
                         f,
                         "{}\n{arrow:>width$} {}:{}:{}\n{}{}",
@@ -417,7 +415,7 @@ impl fmt::Display for Diagnostic {
                             {n} {line}\n\
                             {cap:>width$}{pointer}\
                         ",
-                        n = format!("{n:<spaces$}|", n = span.line_number())
+                        n = format!("{n:<spaces$}|", n = reference.span.line_number())
                             .cyan()
                             .bold(),
                         cap = Lazy::force(&BLUE_PIPE),
@@ -425,8 +423,8 @@ impl fmt::Display for Diagnostic {
                         pointer = format!(
                             "{blank:>start$}{blank:^>end$}",
                             blank = "",
-                            start = span.start() + 1,
-                            end = span.end() - span.start(),
+                            start = reference.span.start() + 1,
+                            end = reference.span.end() - reference.span.start(),
                         )
                         .cyan()
                     );
@@ -434,7 +432,7 @@ impl fmt::Display for Diagnostic {
                     write!(
                         f,
                         "{} {}\n{arrow:>width$} {}:{}:{}\n{}",
-                        "info:".cyan(),
+                        "info:".cyan().bold(),
                         reference.message,
                         reference.span.source(),
                         reference.span.line_number(),

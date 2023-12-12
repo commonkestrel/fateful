@@ -8,7 +8,7 @@ use crate::spanned_error;
 use clio::Input;
 use phf::{phf_map, Map};
 
-static BUILT_INS: Map<&str, &str> = phf_map! {
+static BUILT_INS: Map<&'static str, &str> = phf_map! {
     "macros" => include_str!("../../asm/macros.asm"),
 };
 
@@ -26,14 +26,14 @@ pub fn include(path: Path) -> Result<TokenStream, Errors> {
                 .join("/");
 
             BUILT_INS
-                .get(&locator)
+                .get_entry(&locator)
                 .ok_or_else(|| {
                     vec![spanned_error!(
                         path.span,
                         "built-in module `{locator}` not recognized"
                     )]
                 })
-                .and_then(|builtin| lex::lex_string(*builtin))
+                .and_then(|builtin| lex::lex_string(Some(*builtin.0), *builtin.1))
         }
     }
 }

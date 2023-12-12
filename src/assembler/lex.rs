@@ -48,7 +48,7 @@ impl FromStr for Token {
         let span = Arc::new(Span {
             line: 0,
             range: span,
-            source: Source::String(Arc::new(s.to_owned())),
+            source: Source::String{ source: Arc::new(s.to_owned()), name: None },
         });
         match token {
             Ok(inner) => Ok(Token { inner, span }),
@@ -126,7 +126,7 @@ pub fn lex(mut input: Input) -> LexResult {
     }
 }
 
-pub fn lex_string<S>(file: S) -> LexResult
+pub fn lex_string<S>(name: Option<&'static str>, file: S) -> LexResult
 where
     S: Into<String>,
 {
@@ -155,7 +155,7 @@ where
             let span = Arc::new(Span {
                 line: line_num,
                 range: spanned,
-                source: Source::String(source.clone()),
+                source: Source::String{ name, source: source.clone() },
             });
             match token {
                 Ok(tok) => tokens.push(Token { inner: tok, span }),
@@ -171,7 +171,7 @@ where
             span: Arc::new(Span {
                 line: line_num,
                 range: line.len()..(line.len() + 1),
-                source: Source::String(source.clone()),
+                source: Source::String{ name, source: source.clone() },
             }),
         })
     }
@@ -690,18 +690,20 @@ impl Punctuation {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Source {
     File(Arc<ClioPath>),
-    String(Arc<String>),
+    String{
+        name: Option<&'static str>,
+        source: Arc<String>,
+    },
 }
 
 impl fmt::Display for Source {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Source::File(input) => write!(f, "{}", input.display()),
-            Source::String(s) => {
-                if s.contains('\n') {
-                    Ok(())
-                } else {
-                    write!(f, "\"{s}\"")
+            Source::String{name, source: _} => {
+                match name {
+                    Some(n) => write!(f, "{n}"),
+                    None => Ok(())
                 }
             }
         }
@@ -759,7 +761,7 @@ impl Span {
 
                 line
             }
-            Source::String(s) => s
+            Source::String{ name: _, source } => source
                 .lines()
                 .nth(self.line)
                 .ok_or_else(|| {
@@ -779,7 +781,7 @@ mod tests {
     fn delim() {
         let example = "< )".to_owned();
 
-        let lexed = match lex_string(example) {
+        let lexed = match lex_string(Some("test"), example) {
             Ok(tokens) => tokens,
             Err(errors) => {
                 for error in errors {
