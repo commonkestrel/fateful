@@ -48,14 +48,38 @@
 use super::{
     diagnostic::Diagnostic,
     lex::{Delimeter, Ident, Punctuation, Span, Token, TokenInner, TokenStream},
-    parse::Parenthesized,
+    parse::{Parenthesized, Bracketed},
 };
 use crate::{error, spanned_error};
 use std::{collections::HashMap, iter::Peekable};
 use std::{fmt, slice::Iter, sync::Arc};
 
-pub fn eval_expr(
+pub fn eval_parenthesized(
     tokens: Parenthesized<TokenStream>,
+    defines: &HashMap<String, TokenStream>,
+) -> Result<Token, Diagnostic> {
+    let span = Arc::new(Span {
+        line: tokens.open.span.line,
+        range: tokens.open.span.start()..tokens.close.span.end(),
+        source: tokens.open.span.source.clone(),
+    });
+
+    if tokens.is_empty() {
+        return Err(spanned_error!(span, "empty expression")
+            .with_help("expressions must evaluate to a number"));
+    }
+
+    #[cfg(test)]
+    println!("{}", Tree::parse(&tokens, defines)?);
+
+    Tree::parse(&tokens, defines).map(|tree| Token {
+        inner: TokenInner::Immediate(tree.eval()),
+        span,
+    })
+}
+
+pub fn eval_bracketed(
+    tokens: Bracketed<TokenStream>,
     defines: &HashMap<String, TokenStream>,
 ) -> Result<Token, Diagnostic> {
     let span = Arc::new(Span {
@@ -329,7 +353,7 @@ impl Tree {
                             ))
                         }
                     } else {
-                        Err(Diagnostic::error("No closing parenthesis for expression"))
+                        Err(error!("No closing parenthesis for expression"))
                     }
                 }
                 TI::Punctuation(Punctuation::Not) => {
@@ -337,9 +361,9 @@ impl Tree {
                         value: Box::new(Tree::parse_f(tokens, defines)?),
                     })
                 }
-                _ => todo!(),
+                inner => Err(spanned_error!(tok.span.clone(), "unexpected {} token in expression", inner.description())),
             },
-            None => Err(Diagnostic::error("No tokens found for factor")),
+            None => Err(error!("No tokens found for factor")),
         }
     }
 
@@ -437,7 +461,7 @@ mod tests {
         expr: &str,
         defines: Option<HashMap<String, TokenStream>>,
     ) -> Result<i128, Diagnostic> {
-        let tokens = match crate::assembler::lex::lex_string(expr) {
+        let tokens = match crate::assembler::lex::lex_string(Some("test"), expr) {
             Ok(tok) => tok,
             Err(errors) => {
                 for err in errors {
@@ -471,7 +495,7 @@ mod tests {
     fn define() {
         let defines = [(
             "TEST_DEFINE".to_owned(),
-            crate::assembler::lex::lex_string("(3+4)").expect_or_scream("Unable to lex `3+4`"),
+            crate::assembler::lex::lex_string(Some("expression test"), "(3+4)").expect_or_scream("Unable to lex `3+4`"),
         )];
         let eval = test_expr("(3 * 6 - TEST_DEFINE)", Some(defines.into()))
             .expect_or_scream("Unable to evaluate `(3*6 - TEST_DEFINE)`");
@@ -502,7 +526,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn no_paren() {
-        let eval = test_expr("3+4+5", None).expect_or_scream("Unable to evaluate `(3+4+5)`");
+        let _eval = test_expr("3+4+5", None).expect_or_scream("Unable to evaluate `(3+4+5)`");
     }
 
     #[test]

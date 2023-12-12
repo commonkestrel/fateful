@@ -16,9 +16,9 @@ use super::{
     },
     Errors,
 };
-use crate::{error, note, spanned_error, Token};
+use crate::{error, spanned_error, Token};
 
-use std::{collections::HashMap, iter, str::FromStr, sync::Arc, slice, option};
+use std::{collections::HashMap, iter, str::FromStr, sync::Arc};
 
 use bitflags::bitflags;
 
@@ -37,7 +37,7 @@ impl<T, S> Punctuated<T, S> {
         self.list.len() + if self.last.is_some() { 1 } else { 0 }
     }
 
-    pub fn values(&self) -> Box<dyn Iterator<Item=&T>> {
+    pub fn values<'a>(&'a self) -> Box<dyn Iterator<Item=&T> + 'a> {
         Box::new(self.list.iter().map(|pair| &pair.0).chain(self.last.iter()))
     }
 
@@ -273,7 +273,7 @@ impl DSeg {
             ranges.push(origin..top);
         }
 
-        for range in ranges {}
+        for _range in ranges {}
 
         todo!()
     }
@@ -333,6 +333,7 @@ impl Iterator for Context {
 pub enum ExpTok {
     Label(Label),
     Instruction(Inst),
+    Bytes(Vec<u8>),
 }
 
 impl Parsable for ExpTok {
@@ -378,7 +379,7 @@ pub struct ParseStream {
     pub macros: HashMap<String, Macro>,
 }
 
-pub fn parse(mut stream: TokenStream) -> Result<ParseStream, Errors> {
+pub fn parse(stream: TokenStream) -> Result<ParseStream, Errors> {
     let mut ctx = Context {
         code: Vec::new(),
         data: Vec::new(),
@@ -512,6 +513,13 @@ fn expand_preproc(peek: Token, ctx: &mut Context) -> Result<(), Errors> {
             ctx.stream.splice(start..ctx.position, tokens);
 
             ctx.position = start;
+        }
+        TI::Ident(lex::Ident::Ident(value)) => {
+            if let Some(def) = ctx.defines.get(&value) {
+                ctx.stream.splice(ctx.position..=ctx.position, def.clone());
+            } else {
+                ctx.position += 1;
+            }
         }
         _ => ctx.position += 1,
     }
@@ -705,7 +713,7 @@ impl FromStr for Define {
         if name.contains(' ') {
             return Err(spanned_error!(
                 Span {
-                    source: lex::Source::String(Arc::new(trimmed.to_owned())),
+                    source: lex::Source::String{ name: None, source: Arc::new(trimmed.to_owned()) },
                     line: 0,
                     range: 0..trimmed.len(),
                 }
@@ -714,8 +722,8 @@ impl FromStr for Define {
             ));
         }
 
-        let lexed = lex::lex_string(&trimmed[(pos + 1)..]);
-        let mut value = match lexed {
+        let lexed = lex::lex_string(None, &trimmed[(pos + 1)..]);
+        let value = match lexed {
             Ok(l) => l,
             Err(errors) => {
                 for err in errors {
@@ -935,14 +943,14 @@ impl Parsable for Macro {
         match ctx.peek() {
             Some(Token {
                 inner: TokenInner::Delimeter(Delimeter::OpenParen),
-                span,
+                span: _,
             }) => {
                 rules.push(ctx.parse()?);
                 Ok(Macro { name, rules })
             }
             Some(Token {
                 inner: TokenInner::Delimeter(Delimeter::OpenBrace),
-                span,
+                span: _,
             }) => {
                 let brace: OpenBrace = ctx.parse()?;
                 ctx.skip_newline();
@@ -1062,16 +1070,4 @@ impl Parsable for Address {
             None => Err(error!("expected address, found `eof`")),
         }
     }
-}
-
-#[derive(Debug)]
-pub enum MemAddr {
-    Immediate(Immediate),
-    Variable(Variable),
-}
-
-#[derive(Debug)]
-pub enum ProgAddr {
-    Immediate(Immediate),
-    Label(Ident),
 }
