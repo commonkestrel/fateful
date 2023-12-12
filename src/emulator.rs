@@ -682,8 +682,10 @@ impl State {
             self.addr = self.addr & !0xFF00 | ((bus as u16) << 8);
         }
 
-        if cw.contains(ControlWord::THL) {
+        if cw.contains(ControlWord::THL | ControlWord::RBO) {
             self.addr = ((self.bank.h as u16) << 8) | (self.bank.l as u16);
+        } else if cw.contains(ControlWord::THL | ControlWord::RBI) {
+            let addr = self.addr.ilog2();
         }
 
         if cw.contains(ControlWord::SPI) {

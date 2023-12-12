@@ -74,7 +74,7 @@ These operations are listed here:
 - `LI` (Load Instruction): Loads the the current program byte into the instruction register.
 - `PO` (Program Out): Outputs the current program byte onto the bus.
 - `SR` (Store Register): Stores the register indexed in the instruction register into the register indexed in the current program byte.
-- `THL` (Transfer HL): Transfers the bytes in the H and L registers into the Address Register.
+- `THL` (Transfer HL): Links the bytes in the HL registers and the Address Register.
 - `LA` (Load Address): Outputs the byte of RAM addressed in the Address Register to the bus.
 - `SA` (Store Address): Stores the contents of the bus at the RAM location addressed in the Address Register.
 - `ALI` (Address Low In): Loads the contents of the bus into the low byte of the Address Register.
