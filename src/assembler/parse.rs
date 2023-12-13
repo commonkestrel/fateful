@@ -244,9 +244,9 @@ impl DSeg {
 
 #[derive(Debug)]
 pub struct CSeg {
-    cseg: Option<token::Cseg>,
-    org: Option<Immediate>,
-    tokens: Vec<ExpTok>,
+    pub cseg: Option<token::Cseg>,
+    pub org: Option<Immediate>,
+    pub tokens: Vec<ExpTok>,
 }
 
 #[derive(Debug)]
