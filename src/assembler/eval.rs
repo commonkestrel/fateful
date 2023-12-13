@@ -48,7 +48,7 @@
 use super::{
     diagnostic::Diagnostic,
     lex::{Delimeter, Ident, Punctuation, Span, Token, TokenInner, TokenStream},
-    parse::{Parenthesized, Bracketed},
+    parse::{Bracketed, Parenthesized},
 };
 use crate::{error, spanned_error};
 use std::{collections::HashMap, iter::Peekable};
@@ -361,7 +361,11 @@ impl Tree {
                         value: Box::new(Tree::parse_f(tokens, defines)?),
                     })
                 }
-                inner => Err(spanned_error!(tok.span.clone(), "unexpected {} token in expression", inner.description())),
+                inner => Err(spanned_error!(
+                    tok.span.clone(),
+                    "unexpected {} token in expression",
+                    inner.description()
+                )),
             },
             None => Err(error!("No tokens found for factor")),
         }
@@ -495,7 +499,8 @@ mod tests {
     fn define() {
         let defines = [(
             "TEST_DEFINE".to_owned(),
-            crate::assembler::lex::lex_string(Some("expression test"), "(3+4)").expect_or_scream("Unable to lex `3+4`"),
+            crate::assembler::lex::lex_string(Some("expression test"), "(3+4)")
+                .expect_or_scream("Unable to lex `3+4`"),
         )];
         let eval = test_expr("(3 * 6 - TEST_DEFINE)", Some(defines.into()))
             .expect_or_scream("Unable to evaluate `(3*6 - TEST_DEFINE)`");

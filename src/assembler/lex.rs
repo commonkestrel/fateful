@@ -48,7 +48,10 @@ impl FromStr for Token {
         let span = Arc::new(Span {
             line: 0,
             range: span,
-            source: Source::String{ source: Arc::new(s.to_owned()), name: None },
+            source: Source::String {
+                source: Arc::new(s.to_owned()),
+                name: None,
+            },
         });
         match token {
             Ok(inner) => Ok(Token { inner, span }),
@@ -155,7 +158,10 @@ where
             let span = Arc::new(Span {
                 line: line_num,
                 range: spanned,
-                source: Source::String{ name, source: source.clone() },
+                source: Source::String {
+                    name,
+                    source: source.clone(),
+                },
             });
             match token {
                 Ok(tok) => tokens.push(Token { inner: tok, span }),
@@ -171,7 +177,10 @@ where
             span: Arc::new(Span {
                 line: line_num,
                 range: line.len()..(line.len() + 1),
-                source: Source::String{ name, source: source.clone() },
+                source: Source::String {
+                    name,
+                    source: source.clone(),
+                },
             }),
         })
     }
@@ -690,7 +699,7 @@ impl Punctuation {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Source {
     File(Arc<ClioPath>),
-    String{
+    String {
         name: Option<&'static str>,
         source: Arc<String>,
     },
@@ -700,12 +709,10 @@ impl fmt::Display for Source {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Source::File(input) => write!(f, "{}", input.display()),
-            Source::String{name, source: _} => {
-                match name {
-                    Some(n) => write!(f, "{n}"),
-                    None => Ok(())
-                }
-            }
+            Source::String { name, source: _ } => match name {
+                Some(n) => write!(f, "{n}"),
+                None => Ok(()),
+            },
         }
     }
 }
@@ -761,7 +768,7 @@ impl Span {
 
                 line
             }
-            Source::String{ name: _, source } => source
+            Source::String { name: _, source } => source
                 .lines()
                 .nth(self.line)
                 .ok_or_else(|| {
