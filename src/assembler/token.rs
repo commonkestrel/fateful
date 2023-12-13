@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use super::ascii::AsciiStr;
 use super::lex::{self, Delimeter, PreProc, Punctuation, Span, Token, TokenInner, TokenStream};
-use super::parse::{Context, Parsable};
+use super::parse::{Context, Parsable, Cursor};
 use super::Diagnostic;
 use crate::{error, spanned_error};
 
@@ -69,8 +69,8 @@ macro_rules! parsable {
             }
 
             impl $crate::assembler::parse::Parsable for $name {
-                fn parse(ctx: &mut $crate::assembler::parse::Context) -> Result<Self, Diagnostic> {
-                    match ctx.next() {
+                fn parse(cursor: &mut $crate::assembler::parse::Cursor) -> Result<Self, Diagnostic> {
+                    match cursor.next() {
                         Some($crate::assembler::lex::Token { inner: $crate::assembler::lex::TokenInner::$token($inner), span }) => Ok($name{ span: span, $($($field: ::std::borrow::ToOwned::to_owned($field)),*)? }),
                         Some(tok) => Err(spanned_error!(tok.span, concat!("expected `", $symbol, "`"$(, "or `", $alt)?, ", found {}"), tok.inner.description())),
                         _ => Err(error!(concat!("expected `", $symbol, "`"$(, "or `", $alt)?, ", found `eof`"))),
@@ -88,8 +88,8 @@ macro_rules! parsable {
             }
 
             impl $crate::assembler::parse::Parsable for $name {
-                fn parse(ctx: &mut $crate::assembler::parse::Context) -> Result<Self, Diagnostic> {
-                    match ctx.next() {
+                fn parse(cursor: &mut $crate::assembler::parse::Cursor) -> Result<Self, Diagnostic> {
+                    match cursor.next() {
                         Some($crate::assembler::lex::Token { inner: $crate::assembler::lex::TokenInner::$token($inner), span }) => Ok($name{ span: span, $($($field: $field),*)? }),
                         Some(tok) => Err(spanned_error!(tok.span, concat!("expected", $(" ", stringify!($symbol)),+, ", found {}"), tok.inner.description())),
                         _ => Err(error!(concat!("expected",$(" ", stringify!($symbol)),+, ", found `eof`"))),
@@ -184,8 +184,8 @@ pub struct NewLine {
 }
 
 impl Parsable for NewLine {
-    fn parse(ctx: &mut Context) -> Result<Self, Diagnostic> {
-        match ctx.next() {
+    fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
+        match cursor.next() {
             Some(Token {
                 span,
                 inner: TokenInner::NewLine,
@@ -201,9 +201,9 @@ impl Parsable for NewLine {
 }
 
 impl Parsable for TokenStream {
-    fn parse(ctx: &mut Context) -> Result<Self, Diagnostic> {
+    fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
         let mut stream = Vec::new();
-        for tok in ctx {
+        for tok in cursor {
             if let Token {
                 span: _,
                 inner: TokenInner::NewLine,
@@ -219,8 +219,8 @@ impl Parsable for TokenStream {
 }
 
 impl Parsable for Token {
-    fn parse(ctx: &mut Context) -> Result<Self, Diagnostic> {
-        match ctx.next() {
+    fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
+        match cursor.next() {
             Some(tok) => Ok(tok.clone()),
             None => Err(error!("expected token, found `eof`")),
         }
