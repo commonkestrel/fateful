@@ -7,13 +7,6 @@ something
 
 @include <macros>
 
-@macro add16 {
-    (%h0:reg, %l0:reg, %h1:reg|imm, %l1:reg|imm) {
-        add %l0, %l1
-        adc %h0, %h1
-    }
-}
-
 fib:
     mv r0, 0
     mv r1, 1
@@ -28,3 +21,6 @@ fib:
     jnz r2
 .halt:
     jmp [.halt]
+
+description:
+    @str "something"
