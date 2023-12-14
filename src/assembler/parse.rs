@@ -1019,8 +1019,52 @@ impl MacroDef {
                 .zip(parameters),
         );
 
-        for token in self.expansion.inner.iter() {
-            todo!()
+        let mut cursor = Cursor { stream: self.expansion.inner.clone(), position: 0 };
+        while let Some(tok) = cursor.peek() {
+            match tok.inner {
+                TokenInner::Ident(lex::Ident::PreProc(PreProc::Str)) => {
+                    cursor.position += 1;
+                    let val: LitString = cursor.parse()?;
+                    let _: NewLine = cursor.parse()?;
+    
+                    expanded.push(ExpTok::Bytes(val.value.into_bytes()))
+                }
+                TokenInner::Ident(lex::Ident::PreProc(PreProc::Byte)) => {
+                    cursor.position += 1;
+                    let byte: u8 = ExpTok::bytes_literal(&mut cursor)?;
+                    expanded.push(ExpTok::Bytes(vec![byte]))
+                }
+                TokenInner::Ident(lex::Ident::PreProc(PreProc::Double)) => {
+                    cursor.position += 1;
+                    let bytes: u16 = ExpTok::bytes_literal(&mut cursor)?;
+                    expanded.push(ExpTok::Bytes(bytes.to_be_bytes().to_vec()))
+                }
+                TokenInner::Ident(lex::Ident::PreProc(PreProc::Quad)) => {
+                    cursor.position += 1;
+                    let bytes: u32 = ExpTok::bytes_literal(&mut cursor)?;
+                    expanded.push(ExpTok::Bytes(bytes.to_be_bytes().to_vec()))
+                }
+                _ => {
+                    let name: Ident = cursor.parse()?;
+    
+                    if let Some(Token {
+                        span: _,
+                        inner: TokenInner::Punctuation(Punctuation::Colon),
+                    }) = cursor.peek()
+                    {
+                        let colon: Token![:] = cursor.parse()?;
+                        let nl: NewLine = cursor.parse()?;
+    
+                        expanded.push(ExpTok::Label(Label { name, colon, nl }))
+                    } else {
+                        let args = punctuated!(cursor)?;
+                        // we know there's a newline at the end, so we can just skip it
+                        cursor.position += 1;
+    
+                        expanded.push(ExpTok::Instruction(Inst { name, args }))
+                    }
+                }
+            }
         }
 
         Ok(expanded)
