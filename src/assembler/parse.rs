@@ -16,21 +16,34 @@ use super::{
     },
     Errors,
 };
-use crate::{error, spanned_error, Token};
+use crate::{error, spanned_error, Token, assembler::token::Error};
 
 use std::{collections::HashMap, iter, str::FromStr, sync::Arc};
 
 use bitflags::bitflags;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Punctuated<T, S> {
     list: Vec<(T, S)>,
     last: Option<T>,
 }
 
 impl<T, S> Punctuated<T, S> {
-    pub fn first<'a>(&'a self) -> Option<&T> {
-        self.last.as_ref().and(self.list.last().map(|last| &last.0))
+    pub fn first<'a>(&'a self) -> Option<&'a T> {
+        self.list
+            .first()
+            .map(|first| &first.0)
+            .or(self.last.as_ref())
+    }
+
+    pub fn last<'a>(&'a self) -> Option<&'a T> {
+        self.last.as_ref().or(self.list.last().map(|last| &last.0))
+    }
+
+    pub fn fl<'a>(&'a self) -> Option<(&'a T, &'a T)> {
+        // SAFETY: since `first()` return `Some()`, `last()` must as well
+        self.first()
+            .map(|first| unsafe { (first, self.last().unwrap_unchecked()) })
     }
 
     pub fn len(&self) -> usize {
@@ -91,7 +104,7 @@ macro_rules! punctuated {
 
 macro_rules! wrapped {
     ($name:ident, $macro:ident, $open_token:pat => $open:ident, $close_token:pat => $close:ident, $closing:literal $(,)?) => {
-        #[derive(Debug)]
+        #[derive(Debug, Clone)]
         pub struct $name<T> {
             pub open: $open,
             pub inner: T,
@@ -257,7 +270,10 @@ pub struct Cursor {
 
 impl Cursor {
     pub fn new(stream: TokenStream) -> Self {
-        Cursor { stream, position: 0 }
+        Cursor {
+            stream,
+            position: 0,
+        }
     }
 
     pub fn peek<'a>(&'a self) -> Option<&'a Token> {
@@ -268,11 +284,17 @@ impl Cursor {
         R::parse(self)
     }
 
-    fn skip_newline(&mut self) {
-        while let Some(Token {
-            inner: TokenInner::NewLine,
-            span: _
-        }) = self.peek() {
+    fn skip_ignored(&mut self) {
+        while matches!(
+            self.peek(),
+            Some(Token {
+                inner: TokenInner::NewLine,
+                span: _
+            }) | Some(Token {
+                inner: TokenInner::Doc(_),
+                span: _
+            })
+        ) {
             self.position += 1;
         }
     }
@@ -315,15 +337,70 @@ pub enum ExpTok {
     Bytes(Vec<u8>),
 }
 
+impl ExpTok {
+    fn bytes_literal<T: TryFrom<i128>>(cursor: &mut Cursor) -> Result<T, Diagnostic> {
+        let bytes: T = match cursor.peek() {
+            Some(Token {
+                span,
+                inner: TokenInner::Delimeter(Delimeter::OpenParen),
+            }) => {
+                let expr = parenthesized!(cursor)?;
+                let eval = eval::eval_expr(expr)?;
+                match eval.inner {
+                    TokenInner::Immediate(imm) => imm.try_into().map_err(|_| spanned_error!(eval.span, "byte literal out of range")),
+                    _ => unreachable!(),
+                }
+            }
+            Some(Token {
+                span,
+                inner: TokenInner::Immediate(imm),
+            }) => (*imm)
+                .try_into()
+                .map_err(|_| spanned_error!(span.clone(), "byte literal out of range")),
+            Some(tok) => Err(spanned_error!(tok.span.clone(), "expected byte literal, found {}", tok.inner.description())),
+            None => Err(error!("expected byte literal, found `eof`"))
+        }?;
+
+        Ok(bytes)
+    }
+}
+
 impl Parsable for ExpTok {
     fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
         match cursor.peek() {
-            Some(Token { span, inner: TokenInner::Ident(lex::Ident::PreProc(PreProc::Str)) }) => {
+            Some(Token {
+                span,
+                inner: TokenInner::Ident(lex::Ident::PreProc(PreProc::Str)),
+            }) => {
                 cursor.position += 1;
                 let val: LitString = cursor.parse()?;
                 let _: NewLine = cursor.parse()?;
 
                 Ok(ExpTok::Bytes(val.value.into_bytes()))
+            }
+            Some(Token {
+                span,
+                inner: TokenInner::Ident(lex::Ident::PreProc(PreProc::Byte)),
+            }) => {
+                cursor.position += 1;
+                let byte: u8 = ExpTok::bytes_literal(cursor)?;
+                Ok(ExpTok::Bytes(vec![byte]))
+            }
+            Some(Token {
+                span,
+                inner: TokenInner::Ident(lex::Ident::PreProc(PreProc::Double)),
+            }) => {
+                cursor.position += 1;
+                let bytes: u16 = ExpTok::bytes_literal(cursor)?;
+                Ok(ExpTok::Bytes(bytes.to_be_bytes().to_vec()))
+            }
+            Some(Token {
+                span,
+                inner: TokenInner::Ident(lex::Ident::PreProc(PreProc::Quad)),
+            }) => {
+                cursor.position += 1;
+                let bytes: u32 = ExpTok::bytes_literal(cursor)?;
+                Ok(ExpTok::Bytes(bytes.to_be_bytes().to_vec()))
             }
             _ => {
                 let name: Ident = cursor.parse()?;
@@ -349,7 +426,7 @@ impl Parsable for ExpTok {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Inst {
     pub name: Ident,
     pub args: Punctuated<Argument, Token![,]>,
@@ -383,7 +460,6 @@ pub fn parse(stream: TokenStream) -> Result<ParseStream, Errors> {
         cursor: Cursor::new(stream),
     };
 
-
     let mut errors = Vec::new();
 
     while let Some(tok) = ctx.cursor.peek().cloned() {
@@ -398,13 +474,16 @@ pub fn parse(stream: TokenStream) -> Result<ParseStream, Errors> {
     while let Some(tok) = ctx.cursor.peek() {
         if let TokenInner::Ident(lex::Ident::PreProc(PreProc::Cseg)) = tok.inner {
             let mut segment = Segment::DSeg(DSeg {
-                dseg: ctx.cursor.parse().map_err(|err| Into::<Errors>::into(err))?,
+                dseg: ctx
+                    .cursor
+                    .parse()
+                    .map_err(|err| Into::<Errors>::into(err))?,
                 org: None,
                 variables: HashMap::new(),
             });
 
             std::mem::swap(&mut segment, &mut ctx.current_segment);
-            
+
             match segment {
                 Segment::CSeg(cseg) => ctx.code.push(cseg),
                 Segment::DSeg(dseg) => ctx.data.push(dseg),
@@ -413,7 +492,11 @@ pub fn parse(stream: TokenStream) -> Result<ParseStream, Errors> {
             ctx.cursor.position += 1;
         } else if let TokenInner::Ident(lex::Ident::PreProc(PreProc::Dseg)) = tok.inner {
             let mut segment = Segment::CSeg(CSeg {
-                cseg: Some(ctx.cursor.parse().map_err(|err| Into::<Errors>::into(err))?),
+                cseg: Some(
+                    ctx.cursor
+                        .parse()
+                        .map_err(|err| Into::<Errors>::into(err))?,
+                ),
                 org: None,
                 tokens: Vec::new(),
             });
@@ -426,14 +509,28 @@ pub fn parse(stream: TokenStream) -> Result<ParseStream, Errors> {
             }
 
             ctx.cursor.position += 1;
+        } else if let TokenInner::Ident(lex::Ident::PreProc(PreProc::Org)) = tok.inner {
+            let origin: Org = ctx
+                .cursor
+                .parse()
+                .map_err(|err| Into::<Errors>::into(err))?;
+            if let Some(org) = ctx.current_segment.org() {
+                return Err(Diagnostic::referencing_error(
+                    origin.span,
+                    "duplicate definitions of origin",
+                    Reference::new(org.span.clone(), "origin originally defined here"),
+                )
+                .with_help("`@org` can only be used once per section")
+                .into());
+            } else {
+                *ctx.current_segment.org() = Some(origin.address);
+            }
         } else {
             match ctx.current_segment {
-                Segment::CSeg(ref mut cseg) => {
-                    match ctx.cursor.parse() {
-                        Ok(exp) => cseg.tokens.push(exp),
-                        Err(err) => errors.push(err),
-                    }
-                }
+                Segment::CSeg(ref mut cseg) => match ctx.cursor.parse() {
+                    Ok(exp) => cseg.tokens.push(exp),
+                    Err(err) => errors.push(err),
+                },
                 Segment::DSeg(ref mut dseg) => {
                     let var: VariableDef = match ctx.cursor.parse() {
                         Ok(var) => var,
@@ -444,21 +541,26 @@ pub fn parse(stream: TokenStream) -> Result<ParseStream, Errors> {
                     };
 
                     let span = var.name.span.clone();
-                    if let Some((_, prev_span)) = dseg.variables.insert(var.name.value, (var.size, var.name.span)) {
+                    if let Some((_, prev_span)) = dseg
+                        .variables
+                        .insert(var.name.value, (var.size, var.name.span))
+                    {
                         errors.push(Diagnostic::referencing_error(
                             span,
                             "duplicate variable definition",
-                            Reference::new(
-                                prev_span,
-                                "variable previously defined here",
-                            )
+                            Reference::new(prev_span, "variable previously defined here"),
                         ));
                     }
                 }
             }
         }
 
-        ctx.cursor.skip_newline();
+        ctx.cursor.skip_ignored();
+    }
+
+    match ctx.current_segment {
+        Segment::CSeg(cseg) => ctx.code.push(cseg),
+        Segment::DSeg(dseg) => ctx.data.push(dseg),
     }
 
     if !errors.is_empty() {
@@ -472,12 +574,35 @@ pub fn parse(stream: TokenStream) -> Result<ParseStream, Errors> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Argument {
     Reg(Register),
     Immediate(Immediate),
     Addr(Bracketed<TokenStream>),
     Expr(Parenthesized<TokenStream>),
+    Ident(Ident),
+    Str(LitString),
+}
+
+impl Argument {
+    pub fn span(&self) -> Arc<Span> {
+        match self {
+            Argument::Reg(reg) => reg.span.clone(),
+            Argument::Immediate(imm) => imm.span.clone(),
+            Argument::Ident(ident) => ident.span.clone(),
+            Argument::Str(string) => string.span.clone(),
+            Argument::Addr(addr) => Arc::new(Span {
+                line: addr.open.span.line,
+                range: addr.open.span.start()..addr.open.span.end(),
+                source: addr.open.span.source.clone(),
+            }),
+            Argument::Expr(expr) => Arc::new(Span {
+                line: expr.open.span.line,
+                range: expr.open.span.start()..expr.open.span.end(),
+                source: expr.open.span.source.clone(),
+            }),
+        }
+    }
 }
 
 impl Parsable for Argument {
@@ -499,6 +624,14 @@ impl Parsable for Argument {
                 span: _,
                 inner: TokenInner::Delimeter(Delimeter::OpenParen),
             }) => Ok(Argument::Expr(parenthesized!(cursor)?)),
+            Some(Token {
+                span: _,
+                inner: TokenInner::String(_),
+            }) => Ok(Argument::Str(cursor.parse()?)),
+            Some(Token {
+                span: _,
+                inner: TokenInner::Ident(lex::Ident::Ident(_)),
+            }) => Ok(Argument::Ident(cursor.parse()?)),
             Some(_) => {
                 // SAFETY: Since `peek()` returned `Some`, we know `next()` will as well
                 let next = unsafe { cursor.next().unwrap_unchecked() };
@@ -517,28 +650,30 @@ fn expand_preproc(peek: Token, ctx: &mut Context) -> Result<(), Errors> {
     use TokenInner as TI;
     match peek.inner {
         TI::Ident(lex::Ident::PreProc(PreProc::Define)) => {
-            let def: Define = ctx.cursor.parse().map_err(|err| Into::<Errors>::into(err))?;
+            let start = ctx.cursor.position;
+            let def: Define = ctx
+                .cursor
+                .parse()
+                .map_err(|err| Into::<Errors>::into(err))?;
+
+            ctx.cursor.stream.drain(start..ctx.cursor.position);
+            ctx.cursor.position = start;
+
             ctx.defines.insert(def.name, def.value);
         }
         TI::Ident(lex::Ident::PreProc(PreProc::If)) => {
             eval_if(ctx).map_err(|err| Into::<Errors>::into(err))?
         }
-        TI::Ident(lex::Ident::PreProc(PreProc::Org)) => {
-            let origin: Org = ctx.cursor.parse().map_err(|err| Into::<Errors>::into(err))?;
-            if let Some(org) = ctx.current_segment.org() {
-                return Err(Diagnostic::referencing_error(
-                    origin.span,
-                    "duplicate definitions of origin",
-                    Reference::new(org.span.clone(), "origin originally defined here"),
-                )
-                .with_help("`@org` can only be used once per section")
-                .into());
-            } else {
-                *ctx.current_segment.org() = Some(origin.address);
-            }
-        }
         TI::Ident(lex::Ident::PreProc(PreProc::Macro)) => {
-            let mac: Macro = ctx.cursor.parse().map_err(|err| Into::<Errors>::into(err))?;
+            let start = ctx.cursor.position;
+            let mac: Macro = ctx
+                .cursor
+                .parse()
+                .map_err(|err| Into::<Errors>::into(err))?;
+
+            ctx.cursor.stream.drain(start..ctx.cursor.position);
+            ctx.cursor.position = start;
+
             let name = mac.name.clone();
             if let Some(first) = ctx.macros.insert(mac.name.value.to_owned(), mac) {
                 return Err(Diagnostic::referencing_error(
@@ -552,8 +687,14 @@ fn expand_preproc(peek: Token, ctx: &mut Context) -> Result<(), Errors> {
         TI::Ident(lex::Ident::PreProc(PreProc::Include)) => {
             let start = ctx.cursor.position;
             ctx.cursor.position += 1;
-            let path = ctx.cursor.parse().map_err(|err| Into::<Errors>::into(err))?;
-            let _: NewLine = ctx.cursor.parse().map_err(|err| Into::<Errors>::into(err))?;
+            let path = ctx
+                .cursor
+                .parse()
+                .map_err(|err| Into::<Errors>::into(err))?;
+            let _: NewLine = ctx
+                .cursor
+                .parse()
+                .map_err(|err| Into::<Errors>::into(err))?;
 
             let tokens: TokenStream =
                 include::include(path).map_err(|err| Into::<Errors>::into(err))?;
@@ -561,9 +702,16 @@ fn expand_preproc(peek: Token, ctx: &mut Context) -> Result<(), Errors> {
 
             ctx.cursor.position = start;
         }
+        TI::Ident(lex::Ident::PreProc(PreProc::Error)) => {
+            let error: Error = ctx.parse().map_err(|err| Into::<Errors>::into(err))?;
+            let str: LitString = ctx.parse().map_err(|err| Into::<Errors>::into(err))?;
+            return Err(vec![spanned_error!(error.span, "{}", str.value)])
+        }
         TI::Ident(lex::Ident::Ident(value)) => {
             if let Some(def) = ctx.defines.get(&value) {
-                ctx.cursor.stream.splice(ctx.cursor.position..=ctx.cursor.position, def.clone());
+                ctx.cursor
+                    .stream
+                    .splice(ctx.cursor.position..=ctx.cursor.position, def.clone());
             } else {
                 ctx.cursor.position += 1;
             }
@@ -667,7 +815,7 @@ fn if_expr(ctx: &mut Context) -> Result<bool, Diagnostic> {
         ));
     }
 
-    let eval = eval::eval_no_paren(&ctx.cursor.stream[start..(start + end)], &ctx.defines)?;
+    let eval = eval::eval_preproc(&ctx.cursor.stream[start..(start + end)], &ctx.defines)?;
 
     Ok(eval > 0)
 }
@@ -797,10 +945,8 @@ bitflags! {
         const ADDR = 0b0000_0010;
         const LABEL = 0b0000_0100;
         const STR = 0b0000_1000;
-        const IMM8 = 0b0001_0000;
-        const IMM16 = 0b0011_0000;
-        const IMM32 = 0b0111_0000;
-        const IMM64 = 0b1111_0000;
+        const IMM = 0b0001_0000;
+        const IDENT = 0b0010_0000;
     }
 }
 
@@ -814,10 +960,8 @@ impl From<Vec<Ty>> for Types {
                 lex::Ty::Addr => Types::ADDR,
                 lex::Ty::Label => Types::LABEL,
                 lex::Ty::Str => Types::STR,
-                lex::Ty::Imm8 => Types::IMM8,
-                lex::Ty::Imm16 => Types::IMM16,
-                lex::Ty::Imm32 => Types::IMM32,
-                lex::Ty::Imm64 => Types::IMM64,
+                lex::Ty::Imm => Types::IMM,
+                lex::Ty::Ident => Types::IDENT,
                 lex::Ty::Any => Types::all(),
             })
         }
@@ -833,20 +977,15 @@ pub struct Parameter {
 }
 
 impl Parameter {
-    fn fits(&self, token: &Token) -> bool {
-        use TokenInner as TI;
-        match token.inner {
-            TI::String(_) => self.types.contains(Types::STR),
-            TI::Immediate(imm) => match imm.checked_ilog2() {
-                None | Some(0..=7) => self.types.contains(Types::IMM8),
-                Some(8..=15) => self.types.contains(Types::IMM16),
-                Some(16..=31) => self.types.contains(Types::IMM32),
-                Some(32..=63) => self.types.contains(Types::IMM64),
-                _ => unreachable!(),
-            },
-            TI::Ident(lex::Ident::Register(_)) => self.types.contains(Types::REG),
-            TI::Ident(_) => self.types.contains(Types::LABEL),
-            _ => false,
+    fn fits(&self, arg: &Argument) -> bool {
+        match arg {
+            Argument::Str(_) => self.types.contains(Types::STR),
+            Argument::Immediate(_) | Argument::Expr(_) => self.types.contains(Types::IMM),
+            Argument::Reg(_) => self.types.contains(Types::REG),
+            Argument::Ident(_) => self.types.contains(Types::IDENT),
+            Argument::Addr(expr) => {
+                todo!()
+            }
         }
     }
 }
@@ -858,7 +997,7 @@ pub struct MacroDef {
 }
 
 impl MacroDef {
-    pub fn fits(&self, tokens: &[Token]) -> bool {
+    pub fn fits(&self, tokens: &[Argument]) -> bool {
         if self.parameters.len() != tokens.len() {
             return false;
         }
@@ -870,30 +1009,63 @@ impl MacroDef {
     }
 
     /// Must make sure that the provided parameters match this rule with [`MacroDef::fits`]
-    pub fn expand(&self, parameters: &[Token]) -> Result<TokenStream, Diagnostic> {
-        let mut expanded = TokenStream::with_capacity(self.expansion.inner.len());
+    pub fn expand(&self, parameters: &[Argument]) -> Result<Vec<ExpTok>, Diagnostic> {
+        let mut expanded = Vec::new();
 
-        let parameters: HashMap<String, &Token> = HashMap::from_iter(
+        let parameters: HashMap<String, &Argument> = HashMap::from_iter(
             self.parameters
                 .iter()
                 .map(|p| p.name.name.to_owned())
-                .zip(parameters.into_iter()),
+                .zip(parameters),
         );
 
         for token in self.expansion.inner.iter() {
-            expanded.push(match &token.inner {
-                TokenInner::Ident(lex::Ident::MacroVariable(name)) => {
-                    (*parameters.get(name).ok_or(spanned_error!(
-                        token.span.clone(),
-                        "macro variable `{name}` not found in scope",
-                    ))?)
-                    .clone()
-                }
-                _ => token.clone(),
-            })
+            todo!()
         }
 
         Ok(expanded)
+    }
+
+    fn replace_punctuated(
+        &self,
+        cursor: &mut Cursor,
+        parameters: &HashMap<String, &Argument>,
+    ) -> Result<Punctuated<Argument, Token![,]>, Diagnostic> {
+        let mut arguments = Vec::new();
+        let mut item = None;
+
+        loop {
+            match cursor.next() {
+                Some(Token {
+                    span: _,
+                    inner: TokenInner::NewLine,
+                })
+                | None => break,
+                Some(tok) => {
+                    match item {
+                        Some(it) => {
+                            let seperator = cursor.parse()?;
+                            arguments.push((it, seperator));
+                            item = None;
+                        }
+                        None => {
+                            let next = if let TokenInner::Ident(lex::Ident::MacroVariable(ref var)) = tok.inner {
+                                (*parameters.get(var).ok_or_else(|| spanned_error!(tok.span, "macro variable not recognized"))?).clone()
+                            } else {
+                                cursor.position -= 1;
+                                cursor.parse()?
+                            };
+                            item = Some(next);
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(Punctuated {
+            list: arguments,
+            last: item,
+        })
     }
 
     fn parse_inputs(cursor: &mut Cursor) -> Result<Vec<Parameter>, Diagnostic> {
@@ -975,7 +1147,7 @@ pub struct Macro {
 }
 
 impl Macro {
-    fn expand(self, span: Arc<Span>, parameters: Vec<Token>) -> Result<TokenStream, Diagnostic> {
+    pub fn expand(&self, span: Arc<Span>, parameters: &[Argument]) -> Result<Vec<ExpTok>, Diagnostic> {
         let rule = self
             .rules
             .iter()
@@ -1005,7 +1177,7 @@ impl Parsable for Macro {
                 span: _,
             }) => {
                 let brace: OpenBrace = cursor.parse()?;
-                cursor.skip_newline();
+                cursor.skip_ignored();
 
                 while let Some(tok) = cursor.peek() {
                     use TokenInner as TI;
@@ -1145,14 +1317,35 @@ struct VariableDef {
 impl Parsable for VariableDef {
     fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
         let size: u16 = match cursor.next() {
-            Some(Token { span, inner: TokenInner::Ident(lex::Ident::PreProc(PreProc::Byte))}) => 1,
-            Some(Token { span, inner: TokenInner::Ident(lex::Ident::PreProc(PreProc::Double))}) => 2,
-            Some(Token { span, inner: TokenInner::Ident(lex::Ident::PreProc(PreProc::Quad))}) => 4,
-            Some(Token { span, inner: TokenInner::Ident(lex::Ident::PreProc(PreProc::Var))}) => {
+            Some(Token {
+                span,
+                inner: TokenInner::Ident(lex::Ident::PreProc(PreProc::Byte)),
+            }) => 1,
+            Some(Token {
+                span,
+                inner: TokenInner::Ident(lex::Ident::PreProc(PreProc::Double)),
+            }) => 2,
+            Some(Token {
+                span,
+                inner: TokenInner::Ident(lex::Ident::PreProc(PreProc::Quad)),
+            }) => 4,
+            Some(Token {
+                span,
+                inner: TokenInner::Ident(lex::Ident::PreProc(PreProc::Var)),
+            }) => {
                 let size: Immediate = cursor.parse()?;
-                size.value.try_into().map_err(|_| spanned_error!(size.span, "variable size out of range").with_help("variable size must fit into an unsigned 16-bit integer"))?
-            },
-            Some(tok) => return Err(spanned_error!(tok.span, "expected variable definition, fround {}", tok.inner.description())),
+                size.value.try_into().map_err(|_| {
+                    spanned_error!(size.span, "variable size out of range")
+                        .with_help("variable size must fit into an unsigned 16-bit integer")
+                })?
+            }
+            Some(tok) => {
+                return Err(spanned_error!(
+                    tok.span,
+                    "expected variable definition, fround {}",
+                    tok.inner.description()
+                ))
+            }
             None => return Err(error!("expected variable definition, found `eof`")),
         };
 
@@ -1160,6 +1353,6 @@ impl Parsable for VariableDef {
 
         let _: NewLine = cursor.parse()?;
 
-        Ok(VariableDef {name, size})
+        Ok(VariableDef { name, size })
     }
 }

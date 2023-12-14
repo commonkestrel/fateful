@@ -3,15 +3,15 @@ use std::sync::Arc;
 use crate::{
     assembler::{
         diagnostic::Reference,
-        lex::{Ident, Token, TokenInner, Span},
+        lex::{Ident, Span, Token, TokenInner},
+        parse::DSeg,
         token::Immediate,
-        parse::{DSeg},
     },
-    spanned_error,
+    note, spanned_error,
 };
 
 use super::{
-    parse::{Address, Argument, Inst, ParseStream, Types, CSeg, Macro, ExpTok},
+    parse::{Address, Argument, CSeg, ExpTok, Inst, Macro, ParseStream, Types},
     token::Register,
     Diagnostic, Errors,
 };
@@ -21,21 +21,21 @@ use std::collections::HashMap;
 use phf::{phf_map, Map};
 
 static INSTRUCTIONS: Instructions = Instructions::new(phf_map! {
-    "add" => &[&[Types::REG, Types::REG.union(Types::IMM8)]],
-    "sub" => &[&[Types::REG, Types::REG.union(Types::IMM8)]],
-    "adc" => &[&[Types::REG, Types::REG.union(Types::IMM8)]],
-    "sbc" => &[&[Types::REG, Types::REG.union(Types::IMM8)]],
-    "nand" => &[&[Types::REG, Types::REG.union(Types::IMM8)]],
-    "or" => &[&[Types::REG, Types::REG.union(Types::IMM8)]],
-    "cmp" => &[&[Types::REG, Types::REG.union(Types::IMM8)]],
-    "mv" => &[&[Types::REG, Types::REG.union(Types::IMM8)]],
+    "add" => &[&[Types::REG, Types::REG.union(Types::IMM)]],
+    "sub" => &[&[Types::REG, Types::REG.union(Types::IMM)]],
+    "adc" => &[&[Types::REG, Types::REG.union(Types::IMM)]],
+    "sbc" => &[&[Types::REG, Types::REG.union(Types::IMM)]],
+    "nand" => &[&[Types::REG, Types::REG.union(Types::IMM)]],
+    "or" => &[&[Types::REG, Types::REG.union(Types::IMM)]],
+    "cmp" => &[&[Types::REG, Types::REG.union(Types::IMM)]],
+    "mv" => &[&[Types::REG, Types::REG.union(Types::IMM)]],
     "ld" => &[&[Types::REG], &[Types::REG, Types::ADDR]],
     "st" => &[&[Types::REG], &[Types::ADDR, Types::REG]],
     "lda" => &[&[Types::ADDR]],
     "lpm" => &[&[Types::REG], &[Types::REG, Types::LABEL]],
-    "push" => &[&[Types::REG.union(Types::IMM8)]],
+    "push" => &[&[Types::REG.union(Types::IMM)]],
     "pop" => &[&[Types::REG]],
-    "jnz" => &[&[Types::REG.union(Types::IMM8)]],
+    "jnz" => &[&[Types::REG.union(Types::IMM)]],
     "halt" => &[&[]],
 });
 
@@ -61,8 +61,10 @@ impl Instructions {
                     .zip(matches.iter())
                     .all(|(argument, types)| match argument {
                         Argument::Addr(_) => types.intersects(Types::LABEL | Types::ADDR),
-                        Argument::Expr(_) | Argument::Immediate(_) => types.contains(Types::IMM8),
+                        Argument::Expr(_) | Argument::Immediate(_) => types.contains(Types::IMM),
                         Argument::Reg(_) => types.contains(Types::REG),
+                        Argument::Ident(_) => types.contains(Types::IDENT),
+                        Argument::Str(_) => types.contains(Types::STR),
                     })
             })
         } else {
@@ -235,10 +237,7 @@ pub fn assemble_data(stream: Vec<DSeg>) -> Result<HashMap<String, (u16, Arc<Span
                 errors.push(Diagnostic::referencing_error(
                     span,
                     "duplicate variable definition",
-                    Reference::new(
-                        prev,
-                        "variable previously defined here",
-                    )
+                    Reference::new(prev, "variable previously defined here"),
                 ))
             }
             ptr += variable;
@@ -252,8 +251,24 @@ pub fn assemble_data(stream: Vec<DSeg>) -> Result<HashMap<String, (u16, Arc<Span
     }
 }
 
-fn expand_macro(inst: &Inst, macros: &HashMap<String, Macro>) -> Result<Vec<ExpTok>, Diagnostic> {
-    todo!()
+fn expand_macro(inst: Inst, macros: &HashMap<String, Macro>) -> Result<Vec<ExpTok>, Diagnostic> {
+    let def = macros
+        .get(&inst.name.value)
+        .ok_or_else(|| spanned_error!(inst.name.span.clone(), "instruction not found in scope"))?;
+    let span = inst
+        .args
+        .fl()
+        .map(|(first, last)| {
+            let first_span = first.span();
+            Arc::new(Span {
+                line: first_span.line,
+                source: first_span.source.clone(),
+                range: first_span.start()..last.span().end(),
+            })
+        })
+        .unwrap_or(inst.name.span.clone());
+
+    def.expand(span, &inst.args.into_values())
 }
 
 fn expand_macros(code: &mut Vec<CSeg>, macros: HashMap<String, Macro>) -> Result<(), Errors> {
@@ -264,11 +279,12 @@ fn expand_macros(code: &mut Vec<CSeg>, macros: HashMap<String, Macro>) -> Result
         while let Some(expr) = segment.tokens.get(position) {
             if let ExpTok::Instruction(inst) = expr {
                 if !INSTRUCTIONS.matches(&inst) {
-                    match expand_macro(&inst, &macros) {
-                        Ok(expanded) => { segment.tokens.splice(position..=position, expanded); },
+                    match expand_macro(inst.clone(), &macros) {
+                        Ok(expanded) => {
+                            segment.tokens.splice(position..=position, expanded);
+                        }
                         Err(err) => errors.push(err),
                     }
-                    
                 }
             }
             position += 1;
@@ -283,6 +299,9 @@ fn expand_macros(code: &mut Vec<CSeg>, macros: HashMap<String, Macro>) -> Result
 }
 
 pub fn assemble(mut ctx: ParseStream) -> Result<Vec<u8>, Errors> {
+    note!("{:#?}", ctx.code).emit();
+    note!("{:#?}", ctx.data).emit();
+
     let data = assemble_data(ctx.data)?;
     expand_macros(&mut ctx.code, ctx.macros)?;
 
