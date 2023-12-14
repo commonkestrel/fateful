@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use super::ascii::AsciiStr;
 use super::lex::{self, Delimeter, PreProc, Punctuation, Span, Token, TokenInner, TokenStream};
-use super::parse::{Context, Parsable, Cursor};
+use super::parse::{Context, Cursor, Parsable};
 use super::Diagnostic;
 use crate::{error, spanned_error};
 
@@ -52,6 +52,7 @@ macro_rules! Token {
     [@quad] => {$crate::assembler::token::Quad};
     [@str] => {$crate::assembler::token::Str};
     [@var] => {$crate::assembler::token::Var};
+    [@error] => {$crate::assembler::token::Error};
 }
 
 /// Creates a struct for a varient of [`TokenInner`][crate::lex::TokenInner] and implements [`Parse`] for it.
@@ -158,6 +159,7 @@ parsable! {
     "@quad"   ; match Ident(lex::Ident::PreProc(PreProc::Quad)) => Quad,
     "@str"    ; match Ident(lex::Ident::PreProc(PreProc::Str)) => Str,
     "@var"    ; match Ident(lex::Ident::PreProc(PreProc::Var)) => Var,
+    "@error"  ; match Ident(lex::Ident::PreProc(PreProc::Error)) => Error,
 }
 
 /* Identifiers */

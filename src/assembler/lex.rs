@@ -7,7 +7,7 @@ use std::sync::Arc;
 use super::ascii::{unescape_str, AsciiStr, UnescapeError};
 use super::diagnostic::Diagnostic;
 use super::Errors;
-use crate::error;
+use crate::{error, note};
 use clio::{ClioPath, Input};
 use logos::{Lexer, Logos};
 
@@ -44,7 +44,7 @@ impl FromStr for Token {
         let mut lex = TokenInner::lexer(&skipped).spanned();
         let (token, span) = lex
             .next()
-            .ok_or_else(|| Diagnostic::error("No tokens found in string"))?;
+            .ok_or_else(|| error!("No tokens found in string"))?;
         let span = Arc::new(Span {
             line: 0,
             range: span,
@@ -292,9 +292,9 @@ impl TokenInner {
         let slice = lex
             .slice()
             .strip_prefix("\"")
-            .ok_or_else(|| Diagnostic::error("string not prefixed with `\"`"))?
+            .ok_or_else(|| error!("string not prefixed with `\"`"))?
             .strip_suffix("\"")
-            .ok_or_else(|| Diagnostic::error("string not suffixed with `\"`"))?;
+            .ok_or_else(|| error!("string not suffixed with `\"`"))?;
 
         Ok(unescape_str(&slice).map_err(|err| {
             Diagnostic::error(match err {
@@ -310,9 +310,9 @@ impl TokenInner {
         let slice = lex
             .slice()
             .strip_prefix("r#\"")
-            .ok_or_else(|| Diagnostic::error("string not prefixed with `r#\"`"))?
+            .ok_or_else(|| error!("string not prefixed with `r#\"`"))?
             .strip_suffix("#\"")
-            .ok_or_else(|| Diagnostic::error("string not suffixed with `\"#`"))?;
+            .ok_or_else(|| error!("string not suffixed with `\"#`"))?;
 
         Ok(unescape_str(&slice).map_err(|err| {
             Diagnostic::error(match err {
@@ -332,9 +332,9 @@ impl TokenInner {
     fn char_from_str(s: &str) -> Result<u8, Diagnostic> {
         let inner = s
             .strip_prefix('\'')
-            .ok_or_else(|| Diagnostic::error("char not prefixed with `'`"))?
+            .ok_or_else(|| error!("char not prefixed with `'`"))?
             .strip_suffix('\'')
-            .ok_or_else(|| Diagnostic::error("char not suffixed with `'`"))?;
+            .ok_or_else(|| error!("char not suffixed with `'`"))?;
 
         let escaped = unescape_str(inner).map_err(|err| {
             Diagnostic::error(match err {
@@ -351,7 +351,7 @@ impl TokenInner {
         Ok(lex
             .slice()
             .strip_prefix("///")
-            .ok_or_else(|| Diagnostic::error("doc comment does not start with `///`"))?
+            .ok_or_else(|| error!("doc comment does not start with `///`"))?
             .trim()
             .to_owned())
     }
@@ -383,7 +383,7 @@ impl Ident {
         let slice = lex
             .slice()
             .strip_prefix("$")
-            .ok_or_else(|| Diagnostic::error("variable not prefixed by `$`"))?;
+            .ok_or_else(|| error!("variable not prefixed by `$`"))?;
         Ok(Ident::Variable(slice.to_owned()))
     }
 
@@ -391,7 +391,7 @@ impl Ident {
         let slice = lex
             .slice()
             .strip_prefix("%")
-            .ok_or_else(|| Diagnostic::error("macro variable not prefixed by `%`"))?;
+            .ok_or_else(|| error!("macro variable not prefixed by `%`"))?;
         Ok(Ident::MacroVariable(slice.to_owned()))
     }
 
@@ -400,7 +400,7 @@ impl Ident {
     }
 
     fn any(lex: &mut Lexer<TokenInner>) -> Ident {
-        let slice = lex.slice();
+        let slice = lex.slice().trim();
 
         if let Ok(register) = Register::from_str(slice) {
             Ident::Register(register)
@@ -436,7 +436,7 @@ impl FromStr for Register {
     type Err = Diagnostic;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_uppercase().as_str() {
+        match s {
             "r0" | "A" => Ok(Register::A),
             "r1" | "B" => Ok(Register::B),
             "r2" | "C" => Ok(Register::C),
@@ -470,6 +470,7 @@ pub enum PreProc {
     Quad,
     Str,
     Var,
+    Error,
 }
 
 impl PreProc {
@@ -494,6 +495,7 @@ impl PreProc {
             PP::Quad => "`@quad`",
             PP::Str => "`@str`",
             PP::Var => "`@var`",
+            PP::Error => "`@error`",
         }
     }
 }
@@ -504,7 +506,7 @@ impl FromStr for PreProc {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let argument = s
             .strip_prefix("@")
-            .ok_or_else(|| Diagnostic::error("Preprocessor argument not prefixed by `@`"))?;
+            .ok_or_else(|| error!("Preprocessor argument not prefixed by `@`"))?;
 
         use PreProc as PP;
 
@@ -527,6 +529,7 @@ impl FromStr for PreProc {
             "quad" => Ok(PP::Quad),
             "str" => Ok(PP::Str),
             "var" => Ok(PP::Var),
+            "error" => Ok(PP::Error),
             _ => Err(error!("Unrecognized preprocessor argument")),
         }
     }
@@ -538,10 +541,8 @@ pub enum Ty {
     Reg,
     Addr,
     Label,
-    Imm8,
-    Imm16,
-    Imm32,
-    Imm64,
+    Imm,
+    Ident,
     Str,
 }
 
@@ -554,10 +555,8 @@ impl FromStr for Ty {
             "reg" => Ok(Ty::Reg),
             "addr" => Ok(Ty::Addr),
             "label" => Ok(Ty::Label),
-            "imm" | "imm8" => Ok(Ty::Imm8),
-            "imm16" => Ok(Ty::Imm16),
-            "imm32" => Ok(Ty::Imm32),
-            "imm64" => Ok(Ty::Imm64),
+            "imm" => Ok(Ty::Imm),
+            "ident" => Ok(Ty::Ident),
             "str" => Ok(Ty::Str),
             _ => Err(()),
         }
@@ -746,24 +745,24 @@ impl Span {
     pub fn line(&self) -> Result<String, Diagnostic> {
         match &self.source {
             Source::File(path) => {
-                let mut input = (**path).to_owned().open().map_err(|_| {
-                    Diagnostic::error(format!("Unable to read input {}", path.display()))
-                })?;
+                let mut input = (**path)
+                    .to_owned()
+                    .open()
+                    .map_err(|_| error!("Unable to read input {}", path.display()))?;
                 let reader = input.lock();
 
                 let line = reader
                     .lines()
                     .nth(self.line)
                     .ok_or_else(|| {
-                        Diagnostic::error("Line should be fully contained in the source file")
-                            .as_bug()
+                        error!("Line should be fully contained in the source file").as_bug()
                     })?
                     .map_err(|_| {
-                        Diagnostic::error(format!(
+                        error!(
                             "Unable to read line {} from file {}",
                             self.line,
                             path.display()
-                        ))
+                        )
                     });
 
                 line
@@ -772,8 +771,7 @@ impl Span {
                 .lines()
                 .nth(self.line)
                 .ok_or_else(|| {
-                    Diagnostic::error("Line should be fully contained in the source string")
-                        .as_bug()
+                    error!("Line should be fully contained in the source string").as_bug()
                 })
                 .map(|line| line.to_owned()),
         }
@@ -794,7 +792,7 @@ mod tests {
                 for error in errors {
                     error.force_emit();
                 }
-                Diagnostic::error("lexing failed due to previous errors").scream();
+                error!("lexing failed due to previous errors").scream();
             }
         };
 
