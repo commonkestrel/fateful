@@ -262,7 +262,7 @@ bitflags! {
         /// Load Program Memory
         const LPM = 1 << 22;
         /// Set Halt
-        const SH = 1 << 22;
+        const SH = 1 << 23;
     }
 }
 
@@ -457,9 +457,10 @@ enum Instruction {
     Ld = 0x8,
     St = 0x9,
     Lda = 0xA,
-    Push = 0xB,
-    Pop = 0xC,
-    Jnz = 0xD,
+    Lpm = 0xB,
+    Push = 0xC,
+    Pop = 0xD,
+    Jnz = 0xE,
     Halt = 0xF,
 }
 
@@ -477,9 +478,11 @@ impl From<u8> for Instruction {
             0x8 => Instruction::Ld,
             0x9 => Instruction::St,
             0xA => Instruction::Lda,
-            0xB => Instruction::Push,
-            0xC => Instruction::Pop,
-            0xD => Instruction::Jnz,
+            0xB => Instruction::Lpm,
+            0xC => Instruction::Push,
+            0xD => Instruction::Pop,
+            0xE => Instruction::Jnz,
+            0xF => Instruction::Halt,
             _ => unreachable!(),
         }
     }
@@ -1167,7 +1170,7 @@ async fn single_arg(
     if count != 1 {
         writeln!(
             ewriter,
-            "ARGUMENT ERROR: expected `1` argument, fount `{count}`"
+            "ARGUMENT ERROR: expected 1 argument, found {count}"
         )
         .map_err(|err| EmulatorError::Out(err))?;
         return Ok(());
