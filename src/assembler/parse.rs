@@ -6,7 +6,6 @@
 //! 3. Parse expressions and variables
 
 use super::{
-    diagnostic::{Diagnostic, Reference},
     eval, include,
     lex::{self, Delimeter, PreProc, Punctuation, Span, Token, TokenInner, TokenStream},
     token::{self, ClosedBracket, OpenBracket, Register, Variable},
@@ -16,7 +15,12 @@ use super::{
     },
     Errors,
 };
-use crate::{error, spanned_error, Token, assembler::token::Error};
+
+use crate::{
+    assembler::token::Error,
+    diagnostic::{Diagnostic, Reference},
+    error, note, spanned_error, Token,
+};
 
 use std::{collections::HashMap, iter, str::FromStr, sync::Arc};
 
@@ -262,6 +266,19 @@ pub struct CSeg {
     pub tokens: Vec<ExpTok>,
 }
 
+impl CSeg {
+    pub fn origin(&self, default: u16) -> Result<u16, Diagnostic> {
+        self.org
+            .as_ref()
+            .map(|org| {
+                org.value
+                    .try_into()
+                    .map_err(|_| spanned_error!(org.span.clone(), "segment origin out of range"))
+            })
+            .unwrap_or(Ok(default))
+    }
+}
+
 #[derive(Debug)]
 pub struct Cursor {
     stream: TokenStream,
@@ -339,17 +356,17 @@ pub enum ExpTok {
 
 impl ExpTok {
     fn bytes_literal<T: TryFrom<i128>>(cursor: &mut Cursor) -> Result<T, Diagnostic> {
-        let bytes: T = match cursor.peek() {
+        match cursor.peek() {
             Some(Token {
                 span,
                 inner: TokenInner::Delimeter(Delimeter::OpenParen),
             }) => {
                 let expr = parenthesized!(cursor)?;
                 let eval = eval::eval_expr(expr)?;
-                match eval.inner {
-                    TokenInner::Immediate(imm) => imm.try_into().map_err(|_| spanned_error!(eval.span, "byte literal out of range")),
-                    _ => unreachable!(),
-                }
+
+                eval.value
+                    .try_into()
+                    .map_err(|_| spanned_error!(eval.span, "byte literal out of range"))
             }
             Some(Token {
                 span,
@@ -357,11 +374,35 @@ impl ExpTok {
             }) => (*imm)
                 .try_into()
                 .map_err(|_| spanned_error!(span.clone(), "byte literal out of range")),
-            Some(tok) => Err(spanned_error!(tok.span.clone(), "expected byte literal, found {}", tok.inner.description())),
-            None => Err(error!("expected byte literal, found `eof`"))
-        }?;
+            Some(tok) => Err(spanned_error!(
+                tok.span.clone(),
+                "expected byte literal, found {}",
+                tok.inner.description()
+            )),
+            None => Err(error!("expected byte literal, found `eof`")),
+        }
+    }
 
-        Ok(bytes)
+    fn argument_bytes_literal<T: TryFrom<i128>>(argument: &Argument) -> Result<T, Diagnostic> {
+        match argument {
+            Argument::Immediate(imm) => imm
+                .value
+                .try_into()
+                .map_err(|_| error!("immediate out of range")),
+            Argument::Expr(expr) => {
+                let eval = eval::eval_expr(expr.clone())?;
+                eval.value
+                    .try_into()
+                    .map_err(|_| spanned_error!(eval.span, "byte literal out of range"))
+            }
+            _ => {
+                return Err(spanned_error!(
+                    argument.span(),
+                    "expected literal, found {}",
+                    argument.description()
+                ))
+            }
+        }
     }
 }
 
@@ -585,6 +626,17 @@ pub enum Argument {
 }
 
 impl Argument {
+    pub fn description(&self) -> &'static str {
+        match self {
+            Argument::Reg(_) => "register",
+            Argument::Immediate(_) => "immediate",
+            Argument::Addr(_) => "address",
+            Argument::Expr(_) => "expression",
+            Argument::Ident(_) => "identifier",
+            Argument::Str(_) => "string literal",
+        }
+    }
+
     pub fn span(&self) -> Arc<Span> {
         match self {
             Argument::Reg(reg) => reg.span.clone(),
@@ -593,12 +645,12 @@ impl Argument {
             Argument::Str(string) => string.span.clone(),
             Argument::Addr(addr) => Arc::new(Span {
                 line: addr.open.span.line,
-                range: addr.open.span.start()..addr.open.span.end(),
+                range: addr.open.span.start()..addr.close.span.end(),
                 source: addr.open.span.source.clone(),
             }),
             Argument::Expr(expr) => Arc::new(Span {
                 line: expr.open.span.line,
-                range: expr.open.span.start()..expr.open.span.end(),
+                range: expr.open.span.start()..expr.close.span.end(),
                 source: expr.open.span.source.clone(),
             }),
         }
@@ -705,7 +757,7 @@ fn expand_preproc(peek: Token, ctx: &mut Context) -> Result<(), Errors> {
         TI::Ident(lex::Ident::PreProc(PreProc::Error)) => {
             let error: Error = ctx.parse().map_err(|err| Into::<Errors>::into(err))?;
             let str: LitString = ctx.parse().map_err(|err| Into::<Errors>::into(err))?;
-            return Err(vec![spanned_error!(error.span, "{}", str.value)])
+            return Err(vec![spanned_error!(error.span, "{}", str.value)]);
         }
         TI::Ident(lex::Ident::Ident(value)) => {
             if let Some(def) = ctx.defines.get(&value) {
@@ -984,7 +1036,17 @@ impl Parameter {
             Argument::Reg(_) => self.types.contains(Types::REG),
             Argument::Ident(_) => self.types.contains(Types::IDENT),
             Argument::Addr(expr) => {
-                todo!()
+                let mut types = Types::LABEL | Types::ADDR;
+
+                for tok in expr.inner.iter() {
+                    match tok.inner {
+                        TokenInner::Ident(lex::Ident::Variable(_)) => types.remove(Types::LABEL),
+                        TokenInner::Ident(lex::Ident::Ident(_)) => types.remove(Types::ADDR),
+                        _ => {}
+                    }
+                }
+
+                self.types.intersects(types)
             }
         }
     }
@@ -1019,34 +1081,144 @@ impl MacroDef {
                 .zip(parameters),
         );
 
-        let mut cursor = Cursor { stream: self.expansion.inner.clone(), position: 0 };
+        let mut cursor = Cursor {
+            stream: self.expansion.inner.clone(),
+            position: 0,
+        };
+
+        cursor.skip_ignored();
+
         while let Some(tok) = cursor.peek() {
             match tok.inner {
                 TokenInner::Ident(lex::Ident::PreProc(PreProc::Str)) => {
                     cursor.position += 1;
-                    let val: LitString = cursor.parse()?;
-                    let _: NewLine = cursor.parse()?;
-    
-                    expanded.push(ExpTok::Bytes(val.value.into_bytes()))
+                    match cursor.peek() {
+                        Some(Token {
+                            span,
+                            inner: TokenInner::Ident(lex::Ident::MacroVariable(var)),
+                        }) => match parameters.get(var) {
+                            Some(Argument::Str(str)) => {
+                                expanded.push(ExpTok::Bytes(str.value.clone().into_bytes()));
+
+                                cursor.position += 1;
+                                let _: NewLine = cursor.parse()?;
+                            }
+                            Some(arg) => {
+                                return Err(spanned_error!(
+                                    arg.span(),
+                                    "expected string literal, found {}",
+                                    arg.description(),
+                                ))
+                            }
+                            None => {
+                                return Err(spanned_error!(
+                                    span.clone(),
+                                    "macro variable not found in scope",
+                                ))
+                            }
+                        },
+                        _ => {
+                            let val: LitString = cursor.parse()?;
+                            let _: NewLine = cursor.parse()?;
+
+                            expanded.push(ExpTok::Bytes(val.value.into_bytes()))
+                        }
+                    }
                 }
                 TokenInner::Ident(lex::Ident::PreProc(PreProc::Byte)) => {
                     cursor.position += 1;
-                    let byte: u8 = ExpTok::bytes_literal(&mut cursor)?;
-                    expanded.push(ExpTok::Bytes(vec![byte]))
+                    match cursor.peek() {
+                        Some(Token {
+                            span,
+                            inner: TokenInner::Ident(lex::Ident::MacroVariable(var)),
+                        }) => match parameters.get(var) {
+                            Some(arg) => {
+                                let byte: u8 = ExpTok::argument_bytes_literal(arg)?;
+                                expanded.push(ExpTok::Bytes(vec![byte]));
+                            }
+                            None => {
+                                return Err(spanned_error!(
+                                    span.clone(),
+                                    "macro variable not found in scope"
+                                ))
+                            }
+                        },
+                        _ => {
+                            let byte: u8 = ExpTok::bytes_literal(&mut cursor)?;
+                            expanded.push(ExpTok::Bytes(vec![byte]));
+                        }
+                    }
                 }
                 TokenInner::Ident(lex::Ident::PreProc(PreProc::Double)) => {
                     cursor.position += 1;
-                    let bytes: u16 = ExpTok::bytes_literal(&mut cursor)?;
-                    expanded.push(ExpTok::Bytes(bytes.to_be_bytes().to_vec()))
+                    match cursor.peek() {
+                        Some(Token {
+                            span,
+                            inner: TokenInner::Ident(lex::Ident::MacroVariable(var)),
+                        }) => match parameters.get(var) {
+                            Some(arg) => {
+                                let bytes: u16 = ExpTok::argument_bytes_literal(arg)?;
+                                expanded.push(ExpTok::Bytes(bytes.to_be_bytes().to_vec()));
+                            }
+                            None => {
+                                return Err(spanned_error!(
+                                    span.clone(),
+                                    "macro variable not found in scope"
+                                ))
+                            }
+                        },
+                        _ => {
+                            let bytes: u16 = ExpTok::bytes_literal(&mut cursor)?;
+                            expanded.push(ExpTok::Bytes(bytes.to_be_bytes().to_vec()));
+                        }
+                    }
                 }
                 TokenInner::Ident(lex::Ident::PreProc(PreProc::Quad)) => {
                     cursor.position += 1;
-                    let bytes: u32 = ExpTok::bytes_literal(&mut cursor)?;
-                    expanded.push(ExpTok::Bytes(bytes.to_be_bytes().to_vec()))
+                    match cursor.peek() {
+                        Some(Token {
+                            span,
+                            inner: TokenInner::Ident(lex::Ident::MacroVariable(var)),
+                        }) => match parameters.get(var) {
+                            Some(arg) => {
+                                let bytes: u32 = ExpTok::argument_bytes_literal(arg)?;
+                                expanded.push(ExpTok::Bytes(bytes.to_be_bytes().to_vec()));
+                            }
+                            None => {
+                                return Err(spanned_error!(
+                                    span.clone(),
+                                    "macro variable not found in scope"
+                                ))
+                            }
+                        },
+                        _ => {
+                            let bytes: u32 = ExpTok::bytes_literal(&mut cursor)?;
+                            expanded.push(ExpTok::Bytes(bytes.to_be_bytes().to_vec()));
+                        }
+                    }
                 }
                 _ => {
-                    let name: Ident = cursor.parse()?;
-    
+                    let name: Ident = match cursor.peek() {
+                        Some(Token {
+                            span,
+                            inner: TokenInner::Ident(lex::Ident::MacroVariable(var)),
+                        }) => match parameters.get(var) {
+                            Some(Argument::Ident(ident)) => Ok(ident.clone()),
+                            Some(arg) => {
+                                return Err(spanned_error!(
+                                    span.clone(),
+                                    "expected identifier, found {}",
+                                    arg.description()
+                                ))
+                            }
+                            None => Err(spanned_error!(
+                                span.clone(),
+                                "macro variable not found in scope"
+                            )),
+                        },
+                        _ => cursor.parse(),
+                    }?;
+
                     if let Some(Token {
                         span: _,
                         inner: TokenInner::Punctuation(Punctuation::Colon),
@@ -1054,24 +1226,25 @@ impl MacroDef {
                     {
                         let colon: Token![:] = cursor.parse()?;
                         let nl: NewLine = cursor.parse()?;
-    
+
                         expanded.push(ExpTok::Label(Label { name, colon, nl }))
                     } else {
-                        let args = punctuated!(cursor)?;
+                        let args = MacroDef::replace_punctuated(&mut cursor, &parameters)?;
                         // we know there's a newline at the end, so we can just skip it
                         cursor.position += 1;
-    
+
                         expanded.push(ExpTok::Instruction(Inst { name, args }))
                     }
                 }
             }
+
+            cursor.skip_ignored();
         }
 
         Ok(expanded)
     }
 
     fn replace_punctuated(
-        &self,
         cursor: &mut Cursor,
         parameters: &HashMap<String, &Argument>,
     ) -> Result<Punctuated<Argument, Token![,]>, Diagnostic> {
@@ -1085,24 +1258,28 @@ impl MacroDef {
                     inner: TokenInner::NewLine,
                 })
                 | None => break,
-                Some(tok) => {
-                    match item {
-                        Some(it) => {
-                            let seperator = cursor.parse()?;
-                            arguments.push((it, seperator));
-                            item = None;
-                        }
-                        None => {
-                            let next = if let TokenInner::Ident(lex::Ident::MacroVariable(ref var)) = tok.inner {
-                                (*parameters.get(var).ok_or_else(|| spanned_error!(tok.span, "macro variable not recognized"))?).clone()
-                            } else {
-                                cursor.position -= 1;
-                                cursor.parse()?
-                            };
-                            item = Some(next);
-                        }
+                Some(tok) => match item {
+                    Some(it) => {
+                        cursor.position -= 1;
+                        let seperator: Token![,] = cursor.parse()?;
+                        arguments.push((it, seperator));
+                        item = None;
                     }
-                }
+                    None => {
+                        let next = if let TokenInner::Ident(lex::Ident::MacroVariable(ref var)) =
+                            tok.inner
+                        {
+                            (*parameters.get(var).ok_or_else(|| {
+                                spanned_error!(tok.span, "macro variable not recognized")
+                            })?)
+                            .clone()
+                        } else {
+                            cursor.position -= 1;
+                            cursor.parse()?
+                        };
+                        item = Some(next);
+                    }
+                },
             }
         }
 
@@ -1145,6 +1322,12 @@ impl MacroDef {
                 match tok.inner {
                     TokenInner::Delimeter(Delimeter::ClosedParen) => {
                         let _close: ClosedParen = cursor.parse()?;
+
+                        params.push(Parameter {
+                            name: var,
+                            types: types.into(),
+                        });
+
                         return Ok(params);
                     }
                     TokenInner::Punctuation(Punctuation::Comma) => {
@@ -1191,7 +1374,11 @@ pub struct Macro {
 }
 
 impl Macro {
-    pub fn expand(&self, span: Arc<Span>, parameters: &[Argument]) -> Result<Vec<ExpTok>, Diagnostic> {
+    pub fn expand(
+        &self,
+        span: Arc<Span>,
+        parameters: &[Argument],
+    ) -> Result<Vec<ExpTok>, Diagnostic> {
         let rule = self
             .rules
             .iter()
@@ -1362,19 +1549,19 @@ impl Parsable for VariableDef {
     fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
         let size: u16 = match cursor.next() {
             Some(Token {
-                span,
+                span: _,
                 inner: TokenInner::Ident(lex::Ident::PreProc(PreProc::Byte)),
             }) => 1,
             Some(Token {
-                span,
+                span: _,
                 inner: TokenInner::Ident(lex::Ident::PreProc(PreProc::Double)),
             }) => 2,
             Some(Token {
-                span,
+                span: _,
                 inner: TokenInner::Ident(lex::Ident::PreProc(PreProc::Quad)),
             }) => 4,
             Some(Token {
-                span,
+                span: _,
                 inner: TokenInner::Ident(lex::Ident::PreProc(PreProc::Var)),
             }) => {
                 let size: Immediate = cursor.parse()?;

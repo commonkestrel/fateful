@@ -5,6 +5,8 @@ use deploy::{DeployArgs, DeployError};
 mod assembler;
 use assembler::AssemblerArgs;
 
+mod diagnostic;
+
 #[cfg(test)]
 mod tests;
 
@@ -56,6 +58,8 @@ async fn main() -> Result<(), Error> {
                 for err in errors {
                     err.emit();
                 }
+
+                error!("assembly failed due to previous errors").emit();
 
                 return Err(Error::Assembler);
             }

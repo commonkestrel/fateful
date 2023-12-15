@@ -147,7 +147,11 @@ pub fn unescape_str<'a>(s: &'a str) -> Result<AsciiStr, UnescapeError> {
         ));
     }
 
-    unsafe { Ok(AsciiStr::from_bytes_unchecked(simple.bytes().chain(std::iter::once(0)))) }
+    unsafe {
+        Ok(AsciiStr::from_bytes_unchecked(
+            simple.bytes().chain(std::iter::once(0)),
+        ))
+    }
 }
 
 mod tests {

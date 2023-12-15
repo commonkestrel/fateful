@@ -4,14 +4,13 @@
 
 mod ascii;
 mod assemble;
-mod diagnostic;
 mod eval;
 mod include;
-mod lex;
+pub mod lex;
 mod parse;
 mod token;
+pub use crate::diagnostic::{Diagnostic, OptionalScream, ResultScream};
 use crate::error;
-pub use diagnostic::{Diagnostic, OptionalScream, ResultScream};
 
 use std::sync::OnceLock;
 

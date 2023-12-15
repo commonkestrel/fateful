@@ -1,7 +1,6 @@
-use super::VERBOSITY;
-
-use super::lex::Span;
-use super::Errors;
+use super::assembler::lex::Span;
+use super::assembler::Errors;
+use super::assembler::VERBOSITY;
 
 use std::{error::Error, fmt, sync::Arc};
 
@@ -484,14 +483,14 @@ pub enum Level {
     Note = 4,
 }
 
-impl PartialEq<super::Verbosity> for Level {
-    fn eq(&self, other: &super::Verbosity) -> bool {
+impl PartialEq<super::assembler::Verbosity> for Level {
+    fn eq(&self, other: &super::assembler::Verbosity) -> bool {
         (*self as u8) == (*other as u8)
     }
 }
 
-impl PartialOrd<super::Verbosity> for Level {
-    fn partial_cmp(&self, other: &super::Verbosity) -> Option<std::cmp::Ordering> {
+impl PartialOrd<super::assembler::Verbosity> for Level {
+    fn partial_cmp(&self, other: &super::assembler::Verbosity) -> Option<std::cmp::Ordering> {
         (*self as u8).partial_cmp(&(*other as u8))
     }
 }
@@ -517,42 +516,42 @@ impl Default for Diagnostic {
 
 #[macro_export]
 macro_rules! error {
-    ($($arg:tt)*) => ($crate::assembler::diagnostic::Diagnostic::error(::std::format!($($arg)*)))
+    ($($arg:tt)*) => ($crate::diagnostic::Diagnostic::error(::std::format!($($arg)*)))
 }
 
 #[macro_export]
 macro_rules! spanned_error {
-    ($span:expr, $($arg:tt)*) => ($crate::assembler::diagnostic::Diagnostic::spanned_error($span, ::std::format!($($arg)*)))
+    ($span:expr, $($arg:tt)*) => ($crate::diagnostic::Diagnostic::spanned_error($span, ::std::format!($($arg)*)))
 }
 
 #[macro_export]
 macro_rules! warn {
-    ($($arg:tt)*) => ($crate::assembler::diagnostic::Diagnostic::warning(::std::format!($($arg)*)))
+    ($($arg:tt)*) => ($crate::diagnostic::Diagnostic::warning(::std::format!($($arg)*)))
 }
 
 #[macro_export]
 macro_rules! spanned_warn {
-    ($span:expr, $($arg:tt)*) => ($crate::assembler::diagnostic::Diagnostic::spanned_warning($span, ::std::format!($($arg)*)))
+    ($span:expr, $($arg:tt)*) => ($crate::diagnostic::Diagnostic::spanned_warning($span, ::std::format!($($arg)*)))
 }
 
 #[macro_export]
 macro_rules! note {
-    ($($arg:tt)*) => ($crate::assembler::diagnostic::Diagnostic::note(::std::format!($($arg)*)))
+    ($($arg:tt)*) => ($crate::diagnostic::Diagnostic::note(::std::format!($($arg)*)))
 }
 
 #[macro_export]
 macro_rules! spanned_note {
-    ($span:expr, $($arg:tt)*) => ($crate::assembler::diagnostic::Diagnostic::spanned_note($span, ::std::format!($($arg)*)))
+    ($span:expr, $($arg:tt)*) => ($crate::diagnostic::Diagnostic::spanned_note($span, ::std::format!($($arg)*)))
 }
 
 #[macro_export]
 macro_rules! help {
-    ($($arg:tt)*) => ($crate::assembler::diagnostic::Diagnostic::help(::std::format!($($arg)*)))
+    ($($arg:tt)*) => ($crate::diagnostic::Diagnostic::help(::std::format!($($arg)*)))
 }
 
 #[macro_export]
 macro_rules! spanned_help {
-    ($span:expr, $($arg:tt)*) => ($crate::assembler::diagnostic::Diagnostic::spanned_help($span, ::std::format!($($arg)*)))
+    ($span:expr, $($arg:tt)*) => ($crate::diagnostic::Diagnostic::spanned_help($span, ::std::format!($($arg)*)))
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -5,9 +5,8 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use super::ascii::{unescape_str, AsciiStr, UnescapeError};
-use super::diagnostic::Diagnostic;
 use super::Errors;
-use crate::{error, note};
+use crate::{diagnostic::Diagnostic, error, note};
 use clio::{ClioPath, Input};
 use logos::{Lexer, Logos};
 

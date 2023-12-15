@@ -46,15 +46,15 @@
 //! ```
 
 use super::{
-    diagnostic::Diagnostic,
     lex::{Delimeter, Ident, Punctuation, Span, Token, TokenInner, TokenStream},
     parse::{Bracketed, Parenthesized},
+    token::Immediate,
 };
-use crate::{error, spanned_error};
+use crate::{diagnostic::Diagnostic, error, spanned_error};
 use std::{collections::HashMap, iter::Peekable};
 use std::{fmt, slice::Iter, sync::Arc};
 
-pub fn eval_expr(tokens: Parenthesized<TokenStream>) -> Result<Token, Diagnostic> {
+pub fn eval_expr(tokens: Parenthesized<TokenStream>) -> Result<Immediate, Diagnostic> {
     let span = Arc::new(Span {
         line: tokens.open.span.line,
         range: tokens.open.span.start()..tokens.close.span.end(),
@@ -66,13 +66,16 @@ pub fn eval_expr(tokens: Parenthesized<TokenStream>) -> Result<Token, Diagnostic
             .with_help("expressions must evaluate to a number"));
     }
 
-    Tree::parse(&tokens, &Definitions::Defines(&HashMap::new())).map(|tree| Token {
-        inner: TokenInner::Immediate(tree.eval()),
+    Tree::parse(&tokens, &Definitions::Defines(&HashMap::new())).map(|tree| Immediate {
+        value: tree.eval(),
         span,
     })
 }
 
-pub fn eval_bracketed(tokens: Bracketed<TokenStream>, variables: &HashMap<String, u16>) -> Result<Token, Diagnostic> {
+pub fn eval_bracketed(
+    tokens: Bracketed<TokenStream>,
+    variables: &HashMap<String, (u16, Arc<Span>)>,
+) -> Result<Immediate, Diagnostic> {
     let span = Arc::new(Span {
         line: tokens.open.span.line,
         range: tokens.open.span.start()..tokens.close.span.end(),
@@ -84,8 +87,8 @@ pub fn eval_bracketed(tokens: Bracketed<TokenStream>, variables: &HashMap<String
             .with_help("expressions must evaluate to a number"));
     }
 
-    Tree::parse(&tokens, &Definitions::Variables(variables)).map(|tree| Token {
-        inner: TokenInner::Immediate(tree.eval()),
+    Tree::parse(&tokens, &Definitions::Variables(variables)).map(|tree| Immediate {
+        value: tree.eval(),
         span,
     })
 }
@@ -301,38 +304,39 @@ impl Tree {
     }
 
     /// Parses a factor.
-    fn parse_f(tokens: &mut Peekable<Iter<Token>>, definitions: &Definitions) -> Result<Tree, Diagnostic> {
+    fn parse_f(
+        tokens: &mut Peekable<Iter<Token>>,
+        definitions: &Definitions,
+    ) -> Result<Tree, Diagnostic> {
         use TokenInner as TI;
         match tokens.next() {
             Some(tok) => match &tok.inner {
                 TI::Immediate(imm) => Ok(Tree::Literal(*imm)),
                 TI::Ident(id) => match id {
-                    Ident::Ident(name) | Ident::Variable(name) => {
-                        match definitions {
-                            Definitions::Defines(defs) => {
-                                return if let Some(tok) = defs.get(name) {
-                                    Tree::parse(tok, definitions)
-                                } else {
-                                    Err(spanned_error!(
-                                        tok.span.clone(),
-                                        "identifier `{name}` is not defined.",
-                                    )
-                                    .with_help("constants must be defined before they are used."))
-                                }
-                            }
-                            Definitions::Variables(vars) => {
-                                return if let Some(var) = vars.get(name) {
-                                    Ok(Tree::Literal(*var as i128))
-                                } else {
-                                    Err(spanned_error!(
-                                        tok.span.clone(),
-                                        "variable `{name}` is not defined.",
-                                    )
-                                    .with_help("constants must be defined before they are used."))
-                                }
+                    Ident::Ident(name) | Ident::Variable(name) => match definitions {
+                        Definitions::Defines(defs) => {
+                            return if let Some(tok) = defs.get(name) {
+                                Tree::parse(tok, definitions)
+                            } else {
+                                Err(spanned_error!(
+                                    tok.span.clone(),
+                                    "identifier `{name}` is not defined.",
+                                )
+                                .with_help("constants must be defined before they are used."))
                             }
                         }
-                    }
+                        Definitions::Variables(vars) => {
+                            return if let Some(var) = vars.get(name) {
+                                Ok(Tree::Literal(var.0 as i128))
+                            } else {
+                                Err(spanned_error!(
+                                    tok.span.clone(),
+                                    "variable `{name}` is not defined.",
+                                )
+                                .with_help("constants must be defined before they are used."))
+                            }
+                        }
+                    },
                     _ => Err(Diagnostic::spanned_error(
                         tok.span.clone(),
                         "Unexpected identifier",
@@ -423,7 +427,7 @@ impl fmt::Display for Tree {
 
 enum Definitions<'a> {
     Defines(&'a HashMap<String, TokenStream>),
-    Variables(&'a HashMap<String, u16>),
+    Variables(&'a HashMap<String, (u16, Arc<Span>)>),
 }
 
 #[cfg(test)]
