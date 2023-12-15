@@ -10,11 +10,15 @@
     sbc %h0, %h1
 }
 
+@macro dec (%reg:reg) {
+    sub %reg, 1
+}
+
 @macro jmp {
     () {
         jnz 0
     }
-    (%addr:addr) {
+    (%addr:label) {
         lda %addr
         jmp
     }

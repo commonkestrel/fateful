@@ -1,26 +1,18 @@
 @org 0x0000
-@define COUNT 7
-
-@if COUNT == 8
-something
-@endif
+@define COUNT 3
 
 @include <macros>
 
 fib:
-    mv r0, 0
-    mv r1, 1
-    mv r2, COUNT
+    mv A, 0
+    mv B, 1
+    mv C, COUNT
 .loop:
-    mv r3, r0
-    add r3, r1
-    mv r0, r1
-    mv r1, r3
-    dec r2
+    mv D, A
+    add C, B
+    mv A, B
+    mv B, D
+    dec C
     lda [.loop]
-    jnz r2
-.halt:
-    jmp [.halt]
-
-description:
-    @str "something"
+    jnz C
+    halt
