@@ -2,7 +2,7 @@ add:
     li
     rsb | rbo | aom | aol | pci
 .reg:
-    rsp | aoh
+    rsp | rbo | aoh
 .imm:
     po | aoh
 .both:
@@ -12,7 +12,7 @@ sub:
     li
     rsb | rbo | aom | aol | pci
 .reg:
-    rsp | aoh
+    rsp | rbo | aoh
 .imm:
     po | aoh
 .both:
@@ -22,7 +22,7 @@ adc:
     li
     rsb | rbo | aom | aol | pci
 .reg:
-    rsp | aoh
+    rsp | rbo | aoh
 .imm:
     po | aoh
 .both:
@@ -32,7 +32,7 @@ sbc:
     li
     rsb | rbo | aom | aol | pci
 .reg:
-    rsp | aoh
+    rsp | rbo | aoh
 .imm:
     po | aoh
 .both:
@@ -42,7 +42,7 @@ nand:
     li
     rsb | rbo | aom | aol | pci
 .reg:
-    rsp | aoh
+    rsp | rbo | aoh
 .imm:
     po | aoh
 .both:
@@ -52,17 +52,17 @@ or:
     li
     rsb | rbo | aom | aol | pci
 .reg:
-    rsp | aoh
+    rsp | rbo | aoh
 .imm:
     po | aoh
 .both:
-    ao | aoh | aol | rsb | rbi | cr | pci
+    ao | aoh | rsb | rbi | cr | pci
 
 cmp:
     li
     rsb | rbo | aom | aol | pci
 .reg:
-    rsp | aoh
+    rsp | rbo | aoh
 .imm:
     po | aoh
 .both:
@@ -70,10 +70,10 @@ cmp:
 
 mv:
     li
+    pci
 .reg:
     sr | cr | pci
 .imm:
-    pci
     rsb | rbi | po | cr | pci
 
 ld:
@@ -140,13 +140,13 @@ jnz:
 .reg:
     li
     rsb | rbo | aom | aol
-    aol | aom | aoh
+    aom
     jnz | cr
 .imm:
     li
     pci
     po | aom | aol
-    aol | aom | aoh
+    aom
     jnz | cr
 
 halt:

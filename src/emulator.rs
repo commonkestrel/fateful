@@ -434,11 +434,11 @@ impl fmt::Display for RegBank {
                 REGISTER C: {:#04X}\n\
                 REGISTER D: {:#04X}\n\
                 REGISTER E: {:#04X}\n\
+                REGISTER F: {:#04X}\n\
                 REGISTER H: {:#04X}\n\
                 REGISTER L: {:#04X}\n\
-                REGISTER F: {:#04X}\n\
             ",
-            self.a, self.b, self.c, self.d, self.e, self.h, self.l, self.f,
+            self.a, self.b, self.c, self.d, self.e, self.f, self.h, self.l,
         )
     }
 }
@@ -489,6 +489,8 @@ impl From<u8> for Instruction {
 }
 
 use __head::InstructionHeader;
+
+use crate::note;
 
 /// Seperated into a seperate module to get rid of
 /// the dead code warning that was driving me crazy.
@@ -643,9 +645,6 @@ impl State {
             self.addr = self.sp;
         }
 
-        if cw.contains(ControlWord::RBI) {
-            self.bank.set_reg(reg_index, bus);
-        }
         if cw.contains(ControlWord::SA) {
             match self.addr {
                 0x0000..=0xFFBF => {
@@ -685,12 +684,18 @@ impl State {
             self.addr = self.addr & !0xFF00 | ((bus as u16) << 8);
         }
 
+        if cw.contains(ControlWord::SR) {
+            self.bank.set_reg(self.ctrl.head.register(), self.bank.get_reg(program_byte & 0b0000_0111))
+        }
+
         if cw.contains(ControlWord::THL | ControlWord::RBO) {
             self.addr = ((self.bank.h as u16) << 8) | (self.bank.l as u16);
         } else if cw.contains(ControlWord::THL | ControlWord::RBI) {
             let addr = self.addr.to_be_bytes();
             self.bank.h = addr[0];
             self.bank.l = addr[1];
+        } else if cw.contains(ControlWord::RBI) {
+            self.bank.set_reg(reg_index, bus);
         }
 
         if cw.contains(ControlWord::SPI) {
@@ -699,10 +704,6 @@ impl State {
 
         if cw.contains(ControlWord::SPD) {
             self.sp = self.sp.wrapping_sub(1);
-        }
-
-        if cw.contains(ControlWord::JNZ) && self.sreg.contains(SReg::Z) {
-            self.pc = ((self.bank.h as u16) << 8) | (self.bank.l as u16);
         }
 
         if !cw.contains(ControlWord::AO) {
@@ -716,6 +717,14 @@ impl State {
         }
 
         // falling edge
+        if cw.contains(ControlWord::JNZ) {
+            if !self.sreg.contains(SReg::Z) {
+                self.pc = ((self.bank.h as u16) << 8) | (self.bank.l as u16);
+            } else if !cw.contains(ControlWord::PCI) {
+                self.pc = self.pc.wrapping_add(1);
+            }
+        }
+
         if cw.contains(ControlWord::CR) {
             self.ctrl.clock = 0;
         } else {
@@ -881,6 +890,10 @@ impl fmt::Display for State {
                 PROGRAM COUNTER: {:#06X}\n\
                 STACK POINTER: {:#06X}\n\
                 BUS: {:#04X}\n\
+                SREG: {:#04X}\n\
+                PROGRAM BYTE: {:#04X}\n\
+                ALU PRIMARY: {:#04X}\n\
+                ALU SECONDARY: {:#04X}\n\
                 {}\
                 CONTROL WORD: {:?}\n\
                 INSTRUCTION: {:#010b}\n\
@@ -889,6 +902,10 @@ impl fmt::Display for State {
             self.pc,
             self.sp,
             self.bus,
+            self.sreg.bits(),
+            self.program[self.pc as usize],
+            self.alu.primary,
+            self.alu.secondary,
             self.bank,
             self.cw(),
             self.ctrl.head.bits()
