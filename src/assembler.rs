@@ -10,9 +10,14 @@ pub mod lex;
 mod parse;
 mod token;
 pub use crate::diagnostic::{Diagnostic, OptionalScream, ResultScream};
-use crate::error;
+use crate::{ note, error };
 
-use std::sync::OnceLock;
+use colored::Colorize;
+
+use std::{
+    time::Instant,
+    sync::OnceLock
+};
 
 use clap::Args;
 use clap_verbosity_flag::{Level, WarnLevel};
@@ -51,17 +56,27 @@ pub async fn assemble(
     };
     VERBOSITY.set(verbose).expect("verbosity should be empty");
 
+    let start = Instant::now();
+    let input = format!("{}", args.input);
+
     let lexed = lex::lex(args.input)?;
     let parsed = parse::parse(lexed)?;
     let assembled = assemble::assemble(parsed)?;
 
     args.output
         .lock()
-        .write(&assembled)
+        .write_all(&assembled)
         .map_err(|err| vec![error!("failed to write to output: {err}")])?;
     args.output
         .finish()
-        .map_err(|err| vec![error!("failed to finalize output: {err}")])
+        .map_err(|err| vec![error!("failed to finalize output: {err}")])?;
+    
+    let elapsed = start.elapsed().as_millis();
+    let seconds = elapsed / 1000;
+    let millis = elapsed % 1000;
+    println!("    {} assembling `{}` in {seconds}.{millis:03}s", "Finished".green().bold(), input.trim_matches('"'));
+
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

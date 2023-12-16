@@ -9,7 +9,7 @@ use crate::{
         token::Immediate,
     },
     diagnostic::Reference,
-    note, spanned_error, Token,
+    note, spanned_note, spanned_error, Token,
 };
 
 use super::{
@@ -98,74 +98,13 @@ fn compile_instruction(
     pc: u16,
     data: &HashMap<String, (u16, Arc<Span>)>,
     labels: &HashMap<String, (u16, Arc<Span>)>,
-) -> Result<Instruction, Diagnostic> {
+) -> Result<Instruction, Diagnostic> {    
     let mut arguments = inst.args.into_values();
     for arg in arguments.iter_mut() {
         match arg {
             Argument::Addr(addr) => {
-                let mut mem = None;
-                let mut prog = None;
-
                 for tok in addr.inner.iter_mut() {
-                    if let Token {
-                        span,
-                        inner: TokenInner::Ident(Ident::Ident(val)),
-                    } = tok
-                    {
-                        if let Some(prev) = mem {
-                            return Err(Diagnostic::referencing_error(
-                                span.clone(),
-                                "unexpected label in memory address",
-                                Reference::new(
-                                    prev,
-                                    "interpreted as memory address due to this reference",
-                                ),
-                            ));
-                        }
-                        prog.get_or_insert(span.clone());
-
-                        let label = labels.get(val).ok_or_else(|| {
-                            spanned_error!(span.clone(), "unrecognized identifier in expression")
-                        })?;
-                        tok.inner = TokenInner::Immediate(label.0 as i128);
-                    } else if let Token {
-                        span,
-                        inner: TokenInner::Ident(Ident::Variable(var)),
-                    } = tok
-                    {
-                        if let Some(prev) = prog {
-                            return Err(Diagnostic::referencing_error(
-                                span.clone(),
-                                "unexpected variable in program address",
-                                Reference::new(
-                                    prev,
-                                    "interpreted as program address due to this reference",
-                                ),
-                            ));
-                        }
-                        mem.get_or_insert(span.clone());
-
-                        let variable = data.get(var).ok_or_else(|| {
-                            spanned_error!(span.clone(), "variable not found in scope")
-                        })?;
-                        tok.inner = TokenInner::Immediate(variable.0 as i128);
-                    } else if let Token {
-                        span,
-                        inner: TokenInner::Location,
-                    } = tok
-                    {
-                        if let Some(prev) = mem {
-                            return Err(Diagnostic::referencing_error(
-                                span.clone(),
-                                "unexpected program location in memory address",
-                                Reference::new(
-                                    prev,
-                                    "interpreted as memory address due to this reference",
-                                ),
-                            ));
-                        }
-                        prog.get_or_insert(span.clone());
-
+                    if let TokenInner::Location= tok.inner {
                         tok.inner = TokenInner::Immediate(pc as i128);
                     }
                 }
@@ -225,6 +164,7 @@ fn compile_instruction(
         },
         "lda" => {
             let addr = pull_either(arguments.swap_remove(0), data, labels, pc)?;
+            
             Ok(Instruction::Triple([
                 LDA | IMMEDIATE_MASK,
                 (addr >> 8) as u8,
@@ -480,6 +420,7 @@ fn pull_reference(
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 enum Instruction {
     Single([u8; 1]),
     Double([u8; 2]),
@@ -527,6 +468,7 @@ fn compile(
                             continue;
                         }
                     };
+                    
                     for byte in inst.into_iter() {
                         program[pc as usize] = *byte;
                         pc += 1;

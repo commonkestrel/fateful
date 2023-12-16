@@ -216,7 +216,7 @@ impl Diagnostic {
                 Level::Warning => format!("{}: {}", "warning".yellow(), self.message).bold(),
                 Level::Note => format!("note: {}", self.message).bold(),
                 Level::Help => {
-                    format!("{}: {}", "help".truecolor(150, 150, 255), self.message).bold()
+                    format!("{}: {}", "help".cyan(), self.message).bold()
                 }
             }
         } else {
@@ -240,7 +240,7 @@ impl Diagnostic {
                 }
                 Level::Help => format!(
                     "{}{} {}",
-                    "help".truecolor(150, 150, 255).bold(),
+                    "help".cyan().bold(),
                     ":".bold(),
                     italic_code(&self.message)
                 )
@@ -606,7 +606,7 @@ impl fmt::Display for Child {
             Level::Help => write!(
                 f,
                 "{}: {}",
-                "help".truecolor(150, 150, 255).bold(),
+                "help".cyan().bold(),
                 self.message,
             ),
         }

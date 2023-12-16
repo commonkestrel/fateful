@@ -414,21 +414,21 @@ impl Ident {
 #[derive(Debug, PartialEq, Clone)]
 pub enum Register {
     /// GP register A.
-    A,
+    A = 0,
     /// GP register B.
-    B,
+    B = 1,
     /// GP register C.
-    C,
+    C = 2,
     /// GP register D.
-    D,
+    D = 3,
     /// GP register Z (disposable).
-    Z,
+    E = 4,
     /// Status register
-    S,
+    F = 5,
     /// Memory index low.
-    L,
+    L= 6,
     /// Memory index high.
-    H,
+    H = 7,
 }
 
 impl FromStr for Register {
@@ -440,8 +440,8 @@ impl FromStr for Register {
             "r1" | "B" => Ok(Register::B),
             "r2" | "C" => Ok(Register::C),
             "r3" | "D" => Ok(Register::D),
-            "r4" | "E" => Ok(Register::Z),
-            "r5" | "F" => Ok(Register::S),
+            "r4" | "E" => Ok(Register::E),
+            "r5" | "F" => Ok(Register::F),
             "r6" | "H" => Ok(Register::L),
             "r7" | "L" => Ok(Register::H),
             _ => Err(error!("unknown register")),

@@ -511,6 +511,7 @@ pub fn parse(stream: TokenStream) -> Result<ParseStream, Errors> {
     }
 
     ctx.cursor.position = 0;
+    ctx.cursor.skip_ignored();
 
     while let Some(tok) = ctx.cursor.peek() {
         if let TokenInner::Ident(lex::Ident::PreProc(PreProc::Cseg)) = tok.inner {
@@ -1230,8 +1231,6 @@ impl MacroDef {
                         expanded.push(ExpTok::Label(Label { name, colon, nl }))
                     } else {
                         let args = MacroDef::replace_punctuated(&mut cursor, &parameters)?;
-                        // we know there's a newline at the end, so we can just skip it
-                        cursor.position += 1;
 
                         expanded.push(ExpTok::Instruction(Inst { name, args }))
                     }
