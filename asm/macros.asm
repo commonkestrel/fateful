@@ -23,3 +23,22 @@
         jmp
     }
 }
+
+@macro call {
+    () {
+        push (($ + 1) & 0xFF)
+        push (($ + 1) >> 8)
+        jmp
+    }
+    (%location:label) {
+        push (($ + 1) & 0xFF)
+        push (($ + 1) >> 8)
+        jmp %location
+    }
+}
+
+@macro ret () {
+    pop H
+    pop L
+    jmp
+}
