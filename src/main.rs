@@ -30,8 +30,11 @@ struct Args {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Run the F8ful emulator
     Emulate(EmulatorArgs),
+    /// Deploy a program to a connected CPU
     Deploy(DeployArgs),
+    /// Assemble an assembly program
     Assemble(AssemblerArgs),
 }
 
