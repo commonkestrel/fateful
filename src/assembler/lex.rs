@@ -426,7 +426,7 @@ pub enum Register {
     /// Status register
     F = 5,
     /// Memory index low.
-    L= 6,
+    L = 6,
     /// Memory index high.
     H = 7,
 }
@@ -774,6 +774,14 @@ impl Span {
                 })
                 .map(|line| line.to_owned()),
         }
+    }
+
+    pub fn same_line(start: &Span, end: &Span) -> Arc<Span> {
+        Arc::new(Span {
+            line: start.line,
+            range: start.range.start..end.range.end,
+            source: start.source().clone(),
+        })
     }
 }
 

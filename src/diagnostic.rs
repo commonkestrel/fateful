@@ -215,9 +215,7 @@ impl Diagnostic {
                 Level::Error => format!("{}: {}", "error".red(), self.message).bold(),
                 Level::Warning => format!("{}: {}", "warning".yellow(), self.message).bold(),
                 Level::Note => format!("note: {}", self.message).bold(),
-                Level::Help => {
-                    format!("{}: {}", "help".cyan(), self.message).bold()
-                }
+                Level::Help => format!("{}: {}", "help".cyan(), self.message).bold(),
             }
         } else {
             match self.level {
@@ -603,12 +601,7 @@ impl fmt::Display for Child {
             Level::Error => write!(f, "{}: {}", "error".red().bold(), self.message,),
             Level::Warning => write!(f, "{}: {}", "warning".yellow().bold(), self.message,),
             Level::Note => write!(f, "{}: {}", "note".bold(), self.message),
-            Level::Help => write!(
-                f,
-                "{}: {}",
-                "help".cyan().bold(),
-                self.message,
-            ),
+            Level::Help => write!(f, "{}: {}", "help".cyan().bold(), self.message,),
         }
     }
 }

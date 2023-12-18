@@ -685,7 +685,10 @@ impl State {
         }
 
         if cw.contains(ControlWord::SR) {
-            self.bank.set_reg(self.ctrl.head.register(), self.bank.get_reg(program_byte & 0b0000_0111))
+            self.bank.set_reg(
+                self.ctrl.head.register(),
+                self.bank.get_reg(program_byte & 0b0000_0111),
+            )
         }
 
         if cw.contains(ControlWord::THL | ControlWord::RBO) {
