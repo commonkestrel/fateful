@@ -54,7 +54,11 @@ use crate::{diagnostic::Diagnostic, error, spanned_error};
 use std::{collections::HashMap, iter::Peekable};
 use std::{fmt, slice::Iter, sync::Arc};
 
-pub fn eval_expr(tokens: Parenthesized<TokenStream>) -> Result<Immediate, Diagnostic> {
+pub fn eval_expr(
+    tokens: Parenthesized<TokenStream>,
+    labels: &HashMap<String, (u16, Arc<Span>)>,
+    variables: &HashMap<String, (u16, Arc<Span>)>,
+) -> Result<Immediate, Diagnostic> {
     let span = Arc::new(Span {
         line: tokens.open.span.line,
         range: tokens.open.span.start()..tokens.close.span.end(),
@@ -66,7 +70,7 @@ pub fn eval_expr(tokens: Parenthesized<TokenStream>) -> Result<Immediate, Diagno
             .with_help("expressions must evaluate to a number"));
     }
 
-    Tree::parse(&tokens, &Definitions::Defines(&HashMap::new())).map(|tree| Immediate {
+    Tree::parse(&tokens, &HashMap::new(), labels, variables).map(|tree| Immediate {
         value: tree.eval(),
         span,
     })
@@ -87,7 +91,7 @@ pub fn eval_bracketed(
             .with_help("expressions must evaluate to a number"));
     }
 
-    Tree::parse(&tokens, &Definitions::Variables(variables)).map(|tree| Immediate {
+    Tree::parse(&tokens, &HashMap::new(), &HashMap::new(), variables).map(|tree| Immediate {
         value: tree.eval(),
         span,
     })
@@ -97,7 +101,8 @@ pub fn eval_preproc(
     tokens: &[Token],
     defines: &HashMap<String, TokenStream>,
 ) -> Result<i128, Diagnostic> {
-    Tree::parse(tokens, &Definitions::Defines(defines)).map(|tree| tree.eval())
+    let empty = HashMap::new();
+    Tree::parse(tokens, defines, &empty, &empty).map(|tree| tree.eval())
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -141,30 +146,37 @@ enum Tree {
 }
 
 impl Tree {
-    fn parse(tokens: &[Token], definitions: &Definitions) -> Result<Tree, Diagnostic> {
+    fn parse(
+        tokens: &[Token],
+        defines: &HashMap<String, TokenStream>,
+        labels: &HashMap<String, (u16, Arc<Span>)>,
+        variables: &HashMap<String, (u16, Arc<Span>)>,
+    ) -> Result<Tree, Diagnostic> {
         let mut iter = tokens.iter().peekable();
-        Tree::parse_c(&mut iter, definitions)
+        Tree::parse_c(&mut iter, defines, labels, variables)
     }
 
     /// Parses a comparison
     fn parse_c(
         tokens: &mut Peekable<Iter<Token>>,
-        definitions: &Definitions,
+        defines: &HashMap<String, TokenStream>,
+        labels: &HashMap<String, (u16, Arc<Span>)>,
+        variables: &HashMap<String, (u16, Arc<Span>)>,
     ) -> Result<Tree, Diagnostic> {
         use TokenInner as TI;
 
-        let mut a = Tree::parse_b(tokens, &definitions)?;
+        let mut a = Tree::parse_b(tokens, defines, labels, variables)?;
 
         while let Some(tok) = tokens.peek() {
             match tok.inner {
                 TI::Punctuation(Punctuation::AndAnd) => {
                     tokens.next();
-                    let b = Tree::parse_b(tokens, &definitions)?;
+                    let b = Tree::parse_b(tokens, defines, labels, variables)?;
                     a = Tree::CmpAnd(BinOp::boxed(a, b));
                 }
                 TI::Punctuation(Punctuation::OrOr) => {
                     tokens.next();
-                    let b = Tree::parse_b(tokens, &definitions)?;
+                    let b = Tree::parse_b(tokens, defines, labels, variables)?;
                     a = Tree::CmpOr(BinOp::boxed(a, b));
                 }
                 _ => return Ok(a),
@@ -177,42 +189,44 @@ impl Tree {
     /// Parses a boolean operator
     fn parse_b(
         tokens: &mut Peekable<Iter<Token>>,
-        definitions: &Definitions,
+        defines: &HashMap<String, TokenStream>,
+        labels: &HashMap<String, (u16, Arc<Span>)>,
+        variables: &HashMap<String, (u16, Arc<Span>)>,
     ) -> Result<Tree, Diagnostic> {
         use TokenInner as TI;
 
-        let mut a = Tree::parse_e(tokens, definitions)?;
+        let mut a = Tree::parse_e(tokens, defines, labels, variables)?;
 
         while let Some(tok) = tokens.peek() {
             match tok.inner {
                 TI::Punctuation(Punctuation::EqEq) => {
                     tokens.next();
-                    let b = Tree::parse_e(tokens, definitions)?;
+                    let b = Tree::parse_e(tokens, defines, labels, variables)?;
                     a = Tree::Eq(BinOp::boxed(a, b));
                 }
                 TI::Punctuation(Punctuation::Ne) => {
                     tokens.next();
-                    let b = Tree::parse_e(tokens, definitions)?;
+                    let b = Tree::parse_e(tokens, defines, labels, variables)?;
                     a = Tree::Ne(BinOp::boxed(a, b));
                 }
                 TI::Punctuation(Punctuation::Lt) => {
                     tokens.next();
-                    let b = Tree::parse_e(tokens, definitions)?;
+                    let b = Tree::parse_e(tokens, defines, labels, variables)?;
                     a = Tree::Lt(BinOp::boxed(a, b));
                 }
                 TI::Punctuation(Punctuation::Le) => {
                     tokens.next();
-                    let b = Tree::parse_e(tokens, definitions)?;
+                    let b = Tree::parse_e(tokens, defines, labels, variables)?;
                     a = Tree::Le(BinOp::boxed(a, b));
                 }
                 TI::Punctuation(Punctuation::Gt) => {
                     tokens.next();
-                    let b = Tree::parse_e(tokens, definitions)?;
+                    let b = Tree::parse_e(tokens, defines, labels, variables)?;
                     a = Tree::Gt(BinOp::boxed(a, b));
                 }
                 TI::Punctuation(Punctuation::Ge) => {
                     tokens.next();
-                    let b = Tree::parse_e(tokens, definitions)?;
+                    let b = Tree::parse_e(tokens, defines, labels, variables)?;
                     a = Tree::Ge(BinOp::boxed(a, b));
                 }
                 _ => return Ok(a),
@@ -225,47 +239,49 @@ impl Tree {
     /// Parses an expression.
     fn parse_e(
         tokens: &mut Peekable<Iter<Token>>,
-        definitions: &Definitions,
+        defines: &HashMap<String, TokenStream>,
+        labels: &HashMap<String, (u16, Arc<Span>)>,
+        variables: &HashMap<String, (u16, Arc<Span>)>,
     ) -> Result<Tree, Diagnostic> {
         use TokenInner as TI;
 
-        let mut a = Tree::parse_t(tokens, definitions)?;
+        let mut a = Tree::parse_t(tokens, defines, labels, variables)?;
 
         while let Some(tok) = tokens.peek() {
             match tok.inner {
                 TI::Punctuation(Punctuation::Plus) => {
                     tokens.next();
-                    let b = Tree::parse_t(tokens, definitions)?;
+                    let b = Tree::parse_t(tokens, defines, labels, variables)?;
                     a = Tree::Add(BinOp::boxed(a, b));
                 }
                 TI::Punctuation(Punctuation::Minus) => {
                     tokens.next();
-                    let b = Tree::parse_t(tokens, definitions)?;
+                    let b = Tree::parse_t(tokens, defines, labels, variables)?;
                     a = Tree::Sub(BinOp::boxed(a, b));
                 }
                 TI::Punctuation(Punctuation::And) => {
                     tokens.next();
-                    let b = Tree::parse_t(tokens, definitions)?;
+                    let b = Tree::parse_t(tokens, defines, labels, variables)?;
                     a = Tree::And(BinOp::boxed(a, b));
                 }
                 TI::Punctuation(Punctuation::Or) => {
                     tokens.next();
-                    let b = Tree::parse_t(tokens, definitions)?;
+                    let b = Tree::parse_t(tokens, defines, labels, variables)?;
                     a = Tree::Or(BinOp::boxed(a, b));
                 }
                 TI::Punctuation(Punctuation::Caret) => {
                     tokens.next();
-                    let b = Tree::parse_t(tokens, definitions)?;
+                    let b = Tree::parse_t(tokens, defines, labels, variables)?;
                     a = Tree::Xor(BinOp::boxed(a, b));
                 }
                 TI::Punctuation(Punctuation::Shl) => {
                     tokens.next();
-                    let b = Tree::parse_t(tokens, definitions)?;
+                    let b = Tree::parse_t(tokens, defines, labels, variables)?;
                     a = Tree::Shl(BinOp::boxed(a, b));
                 }
                 TI::Punctuation(Punctuation::Shr) => {
                     tokens.next();
-                    let b = Tree::parse_t(tokens, definitions)?;
+                    let b = Tree::parse_t(tokens, defines, labels, variables)?;
                     a = Tree::Shr(BinOp::boxed(a, b));
                 }
                 _ => return Ok(a),
@@ -278,22 +294,24 @@ impl Tree {
     /// Parses a terminal.
     fn parse_t(
         tokens: &mut Peekable<Iter<Token>>,
-        definitions: &Definitions,
+        defines: &HashMap<String, TokenStream>,
+        labels: &HashMap<String, (u16, Arc<Span>)>,
+        variables: &HashMap<String, (u16, Arc<Span>)>,
     ) -> Result<Tree, Diagnostic> {
         use TokenInner as TI;
 
-        let mut a = Tree::parse_f(tokens, definitions)?;
+        let mut a = Tree::parse_f(tokens, defines, labels, variables)?;
 
         while let Some(tok) = tokens.peek() {
             match tok.inner {
                 TI::Punctuation(Punctuation::Star) => {
                     tokens.next();
-                    let b = Tree::parse_f(tokens, definitions)?;
+                    let b = Tree::parse_f(tokens, defines, labels, variables)?;
                     a = Tree::Mul(BinOp::boxed(a, b));
                 }
                 TI::Punctuation(Punctuation::Slash) => {
                     tokens.next();
-                    let b = Tree::parse_f(tokens, definitions)?;
+                    let b = Tree::parse_f(tokens, defines, labels, variables)?;
                     a = Tree::Div(BinOp::boxed(a, b));
                 }
                 _ => return Ok(a),
@@ -306,44 +324,42 @@ impl Tree {
     /// Parses a factor.
     fn parse_f(
         tokens: &mut Peekable<Iter<Token>>,
-        definitions: &Definitions,
+        defines: &HashMap<String, TokenStream>,
+        labels: &HashMap<String, (u16, Arc<Span>)>,
+        variables: &HashMap<String, (u16, Arc<Span>)>,
     ) -> Result<Tree, Diagnostic> {
         use TokenInner as TI;
         match tokens.next() {
             Some(tok) => match &tok.inner {
                 TI::Immediate(imm) => Ok(Tree::Literal(*imm)),
                 TI::Ident(id) => match id {
-                    Ident::Ident(name) | Ident::Variable(name) => match definitions {
-                        Definitions::Defines(defs) => {
-                            return if let Some(tok) = defs.get(name) {
-                                Tree::parse(tok, definitions)
-                            } else {
-                                Err(spanned_error!(
-                                    tok.span.clone(),
-                                    "identifier `{name}` is not defined.",
-                                )
-                                .with_help("constants must be defined before they are used."))
-                            }
+                    Ident::Ident(name) => {
+                        if let Some(def) = defines.get(name) {
+                            Tree::parse(def, defines, labels, variables)
+                        } else if let Some(label) = labels.get(name) {
+                            Ok(Tree::Literal(label.0 as i128))
+                        } else {
+                            Err(spanned_error!(
+                                tok.span.clone(),
+                                "identifier `{name}` not defined"
+                            ))
                         }
-                        Definitions::Variables(vars) => {
-                            return if let Some(var) = vars.get(name) {
-                                Ok(Tree::Literal(var.0 as i128))
-                            } else {
-                                Err(spanned_error!(
-                                    tok.span.clone(),
-                                    "variable `{name}` is not defined.",
-                                )
-                                .with_help("constants must be defined before they are used."))
-                            }
-                        }
+                    }
+                    Ident::Variable(name) => match variables.get(name) {
+                        Some(var) => Ok(Tree::Literal(var.0 as i128)),
+                        None => Err(spanned_error!(
+                            tok.span.clone(),
+                            "variable `{name}` not defined"
+                        )),
                     },
-                    _ => Err(Diagnostic::spanned_error(
+                    _ => Err(spanned_error!(
                         tok.span.clone(),
-                        "Unexpected identifier",
+                        "unexpected {} in expression",
+                        tok.inner.description(),
                     )),
                 },
                 TI::Delimeter(Delimeter::OpenParen) => {
-                    let a = Tree::parse_c(tokens, definitions)?;
+                    let a = Tree::parse_c(tokens, defines, labels, variables)?;
                     if let Some(tok) = tokens.next() {
                         if let TI::Delimeter(Delimeter::ClosedParen) = tok.inner {
                             Ok(a)
@@ -359,7 +375,7 @@ impl Tree {
                 }
                 TI::Punctuation(Punctuation::Not) => {
                     return Ok(Tree::Not {
-                        value: Box::new(Tree::parse_f(tokens, definitions)?),
+                        value: Box::new(Tree::parse_f(tokens, defines, labels, variables)?),
                     })
                 }
                 inner => Err(spanned_error!(

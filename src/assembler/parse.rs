@@ -263,20 +263,7 @@ impl DSeg {
 pub struct CSeg {
     pub cseg: Option<token::Cseg>,
     pub org: Option<Immediate>,
-    pub tokens: Vec<ExpTok>,
-}
-
-impl CSeg {
-    pub fn origin(&self, default: u16) -> Result<u16, Diagnostic> {
-        self.org
-            .as_ref()
-            .map(|org| {
-                org.value
-                    .try_into()
-                    .map_err(|_| spanned_error!(org.span.clone(), "segment origin out of range"))
-            })
-            .unwrap_or(Ok(default))
-    }
+    pub tokens: Vec<ParseTok>,
 }
 
 #[derive(Debug)]
@@ -348,13 +335,13 @@ impl Context {
 }
 
 #[derive(Debug)]
-pub enum ExpTok {
+pub enum ParseTok {
     Label(Label),
     Instruction(Inst),
     Bytes(Vec<u8>),
 }
 
-impl ExpTok {
+impl ParseTok {
     fn bytes_literal<T: TryFrom<i128>>(cursor: &mut Cursor) -> Result<T, Diagnostic> {
         match cursor.peek() {
             Some(Token {
@@ -362,7 +349,8 @@ impl ExpTok {
                 inner: TokenInner::Delimeter(Delimeter::OpenParen),
             }) => {
                 let expr = parenthesized!(cursor)?;
-                let eval = eval::eval_expr(expr)?;
+                let empty = HashMap::new();
+                let eval = eval::eval_expr(expr, &empty, &empty)?;
 
                 eval.value
                     .try_into()
@@ -390,7 +378,8 @@ impl ExpTok {
                 .try_into()
                 .map_err(|_| error!("immediate out of range")),
             Argument::Expr(expr) => {
-                let eval = eval::eval_expr(expr.clone())?;
+                let empty = HashMap::new();
+                let eval = eval::eval_expr(expr.clone(), &empty, &empty)?;
                 eval.value
                     .try_into()
                     .map_err(|_| spanned_error!(eval.span, "byte literal out of range"))
@@ -406,7 +395,7 @@ impl ExpTok {
     }
 }
 
-impl Parsable for ExpTok {
+impl Parsable for ParseTok {
     fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
         match cursor.peek() {
             Some(Token {
@@ -417,31 +406,31 @@ impl Parsable for ExpTok {
                 let val: LitString = cursor.parse()?;
                 let _: NewLine = cursor.parse()?;
 
-                Ok(ExpTok::Bytes(val.value.into_bytes()))
+                Ok(ParseTok::Bytes(val.value.into_bytes()))
             }
             Some(Token {
                 span,
                 inner: TokenInner::Ident(lex::Ident::PreProc(PreProc::Byte)),
             }) => {
                 cursor.position += 1;
-                let byte: u8 = ExpTok::bytes_literal(cursor)?;
-                Ok(ExpTok::Bytes(vec![byte]))
+                let byte: u8 = ParseTok::bytes_literal(cursor)?;
+                Ok(ParseTok::Bytes(vec![byte]))
             }
             Some(Token {
                 span,
                 inner: TokenInner::Ident(lex::Ident::PreProc(PreProc::Double)),
             }) => {
                 cursor.position += 1;
-                let bytes: u16 = ExpTok::bytes_literal(cursor)?;
-                Ok(ExpTok::Bytes(bytes.to_be_bytes().to_vec()))
+                let bytes: u16 = ParseTok::bytes_literal(cursor)?;
+                Ok(ParseTok::Bytes(bytes.to_be_bytes().to_vec()))
             }
             Some(Token {
                 span,
                 inner: TokenInner::Ident(lex::Ident::PreProc(PreProc::Quad)),
             }) => {
                 cursor.position += 1;
-                let bytes: u32 = ExpTok::bytes_literal(cursor)?;
-                Ok(ExpTok::Bytes(bytes.to_be_bytes().to_vec()))
+                let bytes: u32 = ParseTok::bytes_literal(cursor)?;
+                Ok(ParseTok::Bytes(bytes.to_be_bytes().to_vec()))
             }
             _ => {
                 let name: Ident = cursor.parse()?;
@@ -454,13 +443,13 @@ impl Parsable for ExpTok {
                     let colon: Token![:] = cursor.parse()?;
                     let nl: NewLine = cursor.parse()?;
 
-                    Ok(ExpTok::Label(Label { name, colon, nl }))
+                    Ok(ParseTok::Label(Label { name, colon, nl }))
                 } else {
                     let args = punctuated!(cursor)?;
                     // we know there's a newline at the end, so we can just skip it
                     cursor.position += 1;
 
-                    Ok(ExpTok::Instruction(Inst { name, args }))
+                    Ok(ParseTok::Instruction(Inst { name, args }))
                 }
             }
         }
@@ -1072,7 +1061,7 @@ impl MacroDef {
     }
 
     /// Must make sure that the provided parameters match this rule with [`MacroDef::fits`]
-    pub fn expand(&self, parameters: &[Argument]) -> Result<Vec<ExpTok>, Diagnostic> {
+    pub fn expand(&self, parameters: &[Argument]) -> Result<Vec<ParseTok>, Diagnostic> {
         let mut expanded = Vec::new();
 
         let parameters: HashMap<String, &Argument> = HashMap::from_iter(
@@ -1099,7 +1088,7 @@ impl MacroDef {
                             inner: TokenInner::Ident(lex::Ident::MacroVariable(var)),
                         }) => match parameters.get(var) {
                             Some(Argument::Str(str)) => {
-                                expanded.push(ExpTok::Bytes(str.value.clone().into_bytes()));
+                                expanded.push(ParseTok::Bytes(str.value.clone().into_bytes()));
 
                                 cursor.position += 1;
                                 let _: NewLine = cursor.parse()?;
@@ -1122,7 +1111,7 @@ impl MacroDef {
                             let val: LitString = cursor.parse()?;
                             let _: NewLine = cursor.parse()?;
 
-                            expanded.push(ExpTok::Bytes(val.value.into_bytes()))
+                            expanded.push(ParseTok::Bytes(val.value.into_bytes()))
                         }
                     }
                 }
@@ -1134,8 +1123,8 @@ impl MacroDef {
                             inner: TokenInner::Ident(lex::Ident::MacroVariable(var)),
                         }) => match parameters.get(var) {
                             Some(arg) => {
-                                let byte: u8 = ExpTok::argument_bytes_literal(arg)?;
-                                expanded.push(ExpTok::Bytes(vec![byte]));
+                                let byte: u8 = ParseTok::argument_bytes_literal(arg)?;
+                                expanded.push(ParseTok::Bytes(vec![byte]));
                             }
                             None => {
                                 return Err(spanned_error!(
@@ -1145,8 +1134,8 @@ impl MacroDef {
                             }
                         },
                         _ => {
-                            let byte: u8 = ExpTok::bytes_literal(&mut cursor)?;
-                            expanded.push(ExpTok::Bytes(vec![byte]));
+                            let byte: u8 = ParseTok::bytes_literal(&mut cursor)?;
+                            expanded.push(ParseTok::Bytes(vec![byte]));
                         }
                     }
                 }
@@ -1158,8 +1147,8 @@ impl MacroDef {
                             inner: TokenInner::Ident(lex::Ident::MacroVariable(var)),
                         }) => match parameters.get(var) {
                             Some(arg) => {
-                                let bytes: u16 = ExpTok::argument_bytes_literal(arg)?;
-                                expanded.push(ExpTok::Bytes(bytes.to_be_bytes().to_vec()));
+                                let bytes: u16 = ParseTok::argument_bytes_literal(arg)?;
+                                expanded.push(ParseTok::Bytes(bytes.to_be_bytes().to_vec()));
                             }
                             None => {
                                 return Err(spanned_error!(
@@ -1169,8 +1158,8 @@ impl MacroDef {
                             }
                         },
                         _ => {
-                            let bytes: u16 = ExpTok::bytes_literal(&mut cursor)?;
-                            expanded.push(ExpTok::Bytes(bytes.to_be_bytes().to_vec()));
+                            let bytes: u16 = ParseTok::bytes_literal(&mut cursor)?;
+                            expanded.push(ParseTok::Bytes(bytes.to_be_bytes().to_vec()));
                         }
                     }
                 }
@@ -1182,8 +1171,8 @@ impl MacroDef {
                             inner: TokenInner::Ident(lex::Ident::MacroVariable(var)),
                         }) => match parameters.get(var) {
                             Some(arg) => {
-                                let bytes: u32 = ExpTok::argument_bytes_literal(arg)?;
-                                expanded.push(ExpTok::Bytes(bytes.to_be_bytes().to_vec()));
+                                let bytes: u32 = ParseTok::argument_bytes_literal(arg)?;
+                                expanded.push(ParseTok::Bytes(bytes.to_be_bytes().to_vec()));
                             }
                             None => {
                                 return Err(spanned_error!(
@@ -1193,8 +1182,8 @@ impl MacroDef {
                             }
                         },
                         _ => {
-                            let bytes: u32 = ExpTok::bytes_literal(&mut cursor)?;
-                            expanded.push(ExpTok::Bytes(bytes.to_be_bytes().to_vec()));
+                            let bytes: u32 = ParseTok::bytes_literal(&mut cursor)?;
+                            expanded.push(ParseTok::Bytes(bytes.to_be_bytes().to_vec()));
                         }
                     }
                 }
@@ -1228,11 +1217,11 @@ impl MacroDef {
                         let colon: Token![:] = cursor.parse()?;
                         let nl: NewLine = cursor.parse()?;
 
-                        expanded.push(ExpTok::Label(Label { name, colon, nl }))
+                        expanded.push(ParseTok::Label(Label { name, colon, nl }))
                     } else {
                         let args = MacroDef::replace_punctuated(&mut cursor, &parameters)?;
 
-                        expanded.push(ExpTok::Instruction(Inst { name, args }))
+                        expanded.push(ParseTok::Instruction(Inst { name, args }))
                     }
                 }
             }
@@ -1377,7 +1366,7 @@ impl Macro {
         &self,
         span: Arc<Span>,
         parameters: &[Argument],
-    ) -> Result<Vec<ExpTok>, Diagnostic> {
+    ) -> Result<Vec<ParseTok>, Diagnostic> {
         let rule = self
             .rules
             .iter()

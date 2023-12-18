@@ -9,12 +9,15 @@ use crate::{
         token::Immediate,
     },
     diagnostic::Reference,
-    note, spanned_note, spanned_error, Token,
+    spanned_error, Token,
 };
 
 use super::{
-    parse::{Address, Argument, CSeg, ExpTok, Inst, Macro, ParseStream, Punctuated, Types},
-    token::Register,
+    lex::Register,
+    lex::TokenStream,
+    parse::{
+        Argument, Bracketed, CSeg, Inst, Label, Macro, Parenthesized, ParseStream, ParseTok, Types,
+    },
     Diagnostic, Errors,
 };
 
@@ -93,145 +96,405 @@ impl Instructions {
     }
 }
 
-fn compile_instruction(
-    inst: Inst,
-    pc: u16,
-    data: &HashMap<String, (u16, Arc<Span>)>,
-    labels: &HashMap<String, (u16, Arc<Span>)>,
-) -> Result<Instruction, Diagnostic> {    
-    let mut arguments = inst.args.into_values();
-    for arg in arguments.iter_mut() {
-        match arg {
-            Argument::Addr(addr) => {
-                for tok in addr.inner.iter_mut() {
-                    if let TokenInner::Location= tok.inner {
-                        tok.inner = TokenInner::Immediate(pc as i128);
-                    }
-                }
-            }
-            Argument::Expr(expr) => {
-                for tok in expr.inner.iter_mut() {
-                    if let TokenInner::Location = tok.inner {
-                        tok.inner = TokenInner::Immediate(pc as i128);
-                    }
-                }
-            }
-            _ => {}
+enum Instruction {
+    Add(Register, RegImm),
+    Sub(Register, RegImm),
+    Adc(Register, RegImm),
+    Sbc(Register, RegImm),
+    Nand(Register, RegImm),
+    Or(Register, RegImm),
+    Cmp(Register, RegImm),
+    Mv(Register, RegImm),
+    LdHl(Register),
+    LdAddr(Register, Bracketed<TokenStream>),
+    StHl(Register),
+    StAddr(Bracketed<TokenStream>, Register),
+    Lda(Bracketed<TokenStream>),
+    LpmHl(Register),
+    LpmAddr(Register, Bracketed<TokenStream>),
+    Push(RegImm),
+    Pop(Register),
+    Jnz(RegImm),
+    Halt,
+}
+
+impl Instruction {
+    fn size(&self) -> u16 {
+        match self {
+            Instruction::Add(_, _) => 2,
+            Instruction::Sub(_, _) => 2,
+            Instruction::Adc(_, _) => 2,
+            Instruction::Sbc(_, _) => 2,
+            Instruction::Nand(_, _) => 2,
+            Instruction::Or(_, _) => 2,
+            Instruction::Cmp(_, _) => 2,
+            Instruction::Mv(_, _) => 2,
+            Instruction::LdHl(_) => 1,
+            Instruction::LdAddr(_, _) => 3,
+            Instruction::StHl(_) => 1,
+            Instruction::StAddr(_, _) => 3,
+            Instruction::Lda(_) => 3,
+            Instruction::LpmHl(_) => 1,
+            Instruction::LpmAddr(_, _) => 3,
+            Instruction::Push(regimm) => match regimm {
+                RegImm::Immediate(_) | RegImm::Expr(_) => 2,
+                RegImm::Register(_) => 1,
+            },
+            Instruction::Pop(_) => 1,
+            Instruction::Jnz(regimm) => match regimm {
+                RegImm::Immediate(_) | RegImm::Expr(_) => 2,
+                RegImm::Register(_) => 1,
+            },
+            Instruction::Halt => 1,
         }
     }
 
-    match inst.name.value.as_str() {
-        "add" => pull_double(arguments, ADD),
-        "sub" => pull_double(arguments, SUB),
-        "adc" => pull_double(arguments, ADC),
-        "sbc" => pull_double(arguments, SBC),
-        "nand" => pull_double(arguments, NAND),
-        "or" => pull_double(arguments, OR),
-        "cmp" => pull_double(arguments, CMP),
-        "mv" => pull_double(arguments, MV),
-        "ld" => {
-            let first: u8 = match arguments.swap_remove(0) {
-                Argument::Reg(reg) => reg.inner as u8,
-                _ => unreachable!(),
-            };
+    fn compile(
+        self,
+        pc: u16,
+        data: &HashMap<String, (u16, Arc<Span>)>,
+        labels: &HashMap<String, (u16, Arc<Span>)>,
+    ) -> Result<Bytes, Diagnostic> {
+        match self {
+            Instruction::Add(reg, regimm) => {
+                Instruction::compile_double(ADD, reg, regimm, labels, data)
+            }
+            Instruction::Sub(reg, regimm) => {
+                Instruction::compile_double(SUB, reg, regimm, labels, data)
+            }
+            Instruction::Adc(reg, regimm) => {
+                Instruction::compile_double(ADC, reg, regimm, labels, data)
+            }
+            Instruction::Sbc(reg, regimm) => {
+                Instruction::compile_double(SBC, reg, regimm, labels, data)
+            }
+            Instruction::Nand(reg, regimm) => {
+                Instruction::compile_double(NAND, reg, regimm, labels, data)
+            }
+            Instruction::Or(reg, regimm) => {
+                Instruction::compile_double(OR, reg, regimm, labels, data)
+            }
+            Instruction::Cmp(reg, regimm) => {
+                Instruction::compile_double(CMP, reg, regimm, labels, data)
+            }
+            Instruction::Mv(reg, regimm) => {
+                Instruction::compile_double(MV, reg, regimm, labels, data)
+            }
+            Instruction::Halt => Ok(Bytes::Single([HALT])),
+            _ => todo!(),
+        }
+    }
 
-            if arguments.is_empty() {
-                Ok(Instruction::Single([LD | IMMEDIATE_MASK | first]))
-            } else {
-                let second = pull_address(arguments.swap_remove(0), data)?;
-                Ok(Instruction::Triple([
-                    LD | IMMEDIATE_MASK | first,
-                    (second >> 8) as u8,
-                    (second & 0xFF) as u8,
+    fn compile_double(
+        instruction: u8,
+        reg: Register,
+        regimm: RegImm,
+        labels: &HashMap<String, (u16, Arc<Span>)>,
+        data: &HashMap<String, (u16, Arc<Span>)>,
+    ) -> Result<Bytes, Diagnostic> {
+        match regimm {
+            RegImm::Register(second) => Ok(Bytes::Double([ADD | reg as u8, second as u8])),
+            RegImm::Immediate(imm) => Ok(Bytes::Double([ADD | IMMEDIATE_MASK | reg as u8, imm])),
+            RegImm::Expr(expr) => {
+                let expr_span = Span::same_line(&expr.open.span, &expr.close.span);
+                Ok(Bytes::Double([
+                    instruction | IMMEDIATE_MASK | reg as u8,
+                    eval::eval_expr(expr, labels, data)?
+                        .value
+                        .try_into()
+                        .map_err(|_| spanned_error!(expr_span, "immediate out of range"))?,
                 ]))
             }
         }
-        "st" => match arguments.swap_remove(0) {
-            Argument::Reg(reg) => Ok(Instruction::Single([ST | reg.inner as u8])),
-            addr => {
-                let address = pull_address(addr, data)?;
-                let reg = match arguments.swap_remove(0) {
+    }
+}
+
+impl TryFrom<Inst> for Instruction {
+    type Error = Diagnostic;
+
+    fn try_from(mut value: Inst) -> Result<Self, Self::Error> {
+        let mut args = value.args.into_values();
+        match value.name.value.as_str() {
+            "add" => {
+                if args.len() != 2 {
+                    return Err(spanned_error!(
+                        value.name.span,
+                        "expected 2 arguments, found {}",
+                        args.len()
+                    ));
+                }
+                let (reg, regimm) = pull_double(args)?;
+                Ok(Instruction::Add(reg, regimm))
+            }
+            "sub" => {
+                if args.len() != 2 {
+                    return Err(spanned_error!(
+                        value.name.span,
+                        "expected 2 arguments, found {}",
+                        args.len()
+                    ));
+                }
+                let (reg, regimm) = pull_double(args)?;
+                Ok(Instruction::Sub(reg, regimm))
+            }
+            "adc" => {
+                if args.len() != 2 {
+                    return Err(spanned_error!(
+                        value.name.span,
+                        "expected 2 arguments, found {}",
+                        args.len()
+                    ));
+                }
+                let (reg, regimm) = pull_double(args)?;
+                Ok(Instruction::Adc(reg, regimm))
+            }
+            "sbc" => {
+                if args.len() != 2 {
+                    return Err(spanned_error!(
+                        value.name.span,
+                        "expected 2 arguments, found {}",
+                        args.len()
+                    ));
+                }
+                let (reg, regimm) = pull_double(args)?;
+                Ok(Instruction::Sbc(reg, regimm))
+            }
+            "nand" => {
+                if args.len() != 2 {
+                    return Err(spanned_error!(
+                        value.name.span,
+                        "expected 2 arguments, found {}",
+                        args.len()
+                    ));
+                }
+                let (reg, regimm) = pull_double(args)?;
+                Ok(Instruction::Nand(reg, regimm))
+            }
+            "or" => {
+                if args.len() != 2 {
+                    return Err(spanned_error!(
+                        value.name.span,
+                        "expected 2 arguments, found {}",
+                        args.len()
+                    ));
+                }
+                let (reg, regimm) = pull_double(args)?;
+                Ok(Instruction::Or(reg, regimm))
+            }
+            "cmp" => {
+                if args.len() != 2 {
+                    return Err(spanned_error!(
+                        value.name.span,
+                        "expected 2 arguments, found {}",
+                        args.len()
+                    ));
+                }
+                let (reg, regimm) = pull_double(args)?;
+                Ok(Instruction::Cmp(reg, regimm))
+            }
+            "mv" => {
+                if args.len() != 2 {
+                    return Err(spanned_error!(
+                        value.name.span,
+                        "expected 2 arguments, found {}",
+                        args.len()
+                    ));
+                }
+                let (reg, regimm) = pull_double(args)?;
+                Ok(Instruction::Mv(reg, regimm))
+            }
+            "ld" => {
+                if args.len() != 1 && args.len() != 2 {
+                    return Err(spanned_error!(
+                        value.name.span,
+                        "expected 1 or 2 arguments, found {}",
+                        args.len()
+                    ));
+                }
+
+                let reg = match args.swap_remove(0) {
                     Argument::Reg(reg) => reg.inner,
-                    _ => unreachable!(),
+                    arg => {
+                        return Err(spanned_error!(
+                            arg.span(),
+                            "expected register, found {}",
+                            arg.description()
+                        ))
+                    }
                 };
 
-                Ok(Instruction::Triple([
-                    ST | IMMEDIATE_MASK | reg as u8,
-                    (address >> 8) as u8,
-                    (address & 0xFF) as u8,
-                ]))
-            }
-        },
-        "lda" => {
-            let addr = pull_either(arguments.swap_remove(0), data, labels, pc)?;
-            
-            Ok(Instruction::Triple([
-                LDA | IMMEDIATE_MASK,
-                (addr >> 8) as u8,
-                (addr & 0xFF) as u8,
-            ]))
-        }
-        "lpm" => {
-            let first: u8 = match arguments.swap_remove(0) {
-                Argument::Reg(reg) => reg.inner as u8,
-                _ => unreachable!(),
-            };
+                if args.is_empty() {
+                    Ok(Instruction::LdHl(reg))
+                } else {
+                    let addr = match args.swap_remove(0) {
+                        Argument::Addr(addr) => addr,
+                        arg => {
+                            return Err(spanned_error!(
+                                arg.span(),
+                                "expected address, found {}",
+                                arg.description()
+                            ))
+                        }
+                    };
 
-            if arguments.is_empty() {
-                Ok(Instruction::Single([LD | IMMEDIATE_MASK | first]))
-            } else {
-                let second = pull_reference(arguments.swap_remove(0), labels)?;
-                Ok(Instruction::Triple([
-                    LD | IMMEDIATE_MASK | first,
-                    (second >> 8) as u8,
-                    (second & 0xFF) as u8,
-                ]))
+                    Ok(Instruction::LdAddr(reg, addr))
+                }
             }
+            "st" => match args.len() {
+                1 => {
+                    let reg = match args.swap_remove(0) {
+                        Argument::Reg(reg) => reg.inner,
+                        arg => {
+                            return Err(spanned_error!(
+                                arg.span(),
+                                "expected register, found {}",
+                                arg.description(),
+                            ))
+                        }
+                    };
+
+                    Ok(Instruction::StHl(reg))
+                }
+                2 => {
+                    let addr = match args.swap_remove(0) {
+                        Argument::Addr(addr) => addr,
+                        arg => {
+                            return Err(spanned_error!(
+                                arg.span(),
+                                "expected address, found {}",
+                                arg.description(),
+                            ))
+                        }
+                    };
+
+                    let reg = match args.swap_remove(0) {
+                        Argument::Reg(reg) => reg.inner,
+                        arg => {
+                            return Err(spanned_error!(
+                                arg.span(),
+                                "expected register, found {}",
+                                arg.description(),
+                            ))
+                        }
+                    };
+
+                    Ok(Instruction::StAddr(addr, reg))
+                }
+                len => Err(spanned_error!(
+                    value.name.span,
+                    "expected 1 or 2 arguments, found {len}"
+                )),
+            },
+            "lda" => {
+                if args.len() != 1 {
+                    return Err(spanned_error!(
+                        value.name.span,
+                        "expected 1 argument, found {}",
+                        args.len()
+                    ));
+                }
+
+                let addr = match args.swap_remove(0) {
+                    Argument::Addr(addr) => addr,
+                    arg => {
+                        return Err(spanned_error!(
+                            arg.span(),
+                            "expected address, found {}",
+                            arg.description(),
+                        ))
+                    }
+                };
+
+                Ok(Instruction::Lda(addr))
+            }
+            "lpm" => {
+                if args.len() != 1 && args.len() != 2 {
+                    return Err(spanned_error!(
+                        value.name.span,
+                        "expected 1 or 2 arguments, found {}",
+                        args.len()
+                    ));
+                }
+
+                let reg = match args.swap_remove(0) {
+                    Argument::Reg(reg) => reg.inner,
+                    arg => {
+                        return Err(spanned_error!(
+                            arg.span(),
+                            "expected register, found {}",
+                            arg.description()
+                        ))
+                    }
+                };
+
+                if args.is_empty() {
+                    Ok(Instruction::LpmHl(reg))
+                } else {
+                    let addr = match args.swap_remove(0) {
+                        Argument::Addr(addr) => addr,
+                        arg => {
+                            return Err(spanned_error!(
+                                arg.span(),
+                                "expected address, found {}",
+                                arg.description()
+                            ))
+                        }
+                    };
+
+                    Ok(Instruction::LpmAddr(reg, addr))
+                }
+            }
+            "push" => {
+                let regimm = match args.swap_remove(0) {
+                    Argument::Reg(reg) => RegImm::Register(reg.inner),
+                    arg => {
+                        return Err(spanned_error!(
+                            arg.span(),
+                            "expected register or immediate, found {}",
+                            arg.description()
+                        ))
+                    }
+                };
+
+                Ok(Instruction::Push(regimm))
+            }
+            "pop" => {
+                let reg = match args.swap_remove(0) {
+                    Argument::Reg(reg) => reg.inner,
+                    arg => {
+                        return Err(spanned_error!(
+                            arg.span(),
+                            "expected register, found {}",
+                            arg.description()
+                        ))
+                    }
+                };
+
+                Ok(Instruction::Pop(reg))
+            }
+            "jnz" => {
+                let regimm = match args.swap_remove(0) {
+                    Argument::Reg(reg) => RegImm::Register(reg.inner),
+                    arg => {
+                        return Err(spanned_error!(
+                            arg.span(),
+                            "expected register or immediate, found {}",
+                            arg.description()
+                        ))
+                    }
+                };
+
+                Ok(Instruction::Jnz(regimm))
+            }
+            "halt" => match args.len() {
+                0 => Ok(Instruction::Halt),
+                len => Err(spanned_error!(
+                    value.name.span,
+                    "expected 0 arguments, found {len}"
+                )),
+            },
+            _ => Err(spanned_error!(value.name.span, "unknown instruction")),
         }
-        "push" => match arguments.swap_remove(0) {
-            Argument::Immediate(imm) => Ok(Instruction::Double([
-                PUSH | IMMEDIATE_MASK,
-                imm.value
-                    .try_into()
-                    .map_err(|_| spanned_error!(imm.span, "immediate out of range"))?,
-            ])),
-            Argument::Expr(expr) => {
-                let imm = eval::eval_expr(expr)?;
-                Ok(Instruction::Double([
-                    PUSH | IMMEDIATE_MASK,
-                    imm.value
-                        .try_into()
-                        .map_err(|_| spanned_error!(imm.span, "immediate out of range"))?,
-                ]))
-            }
-            Argument::Reg(reg) => Ok(Instruction::Single([PUSH | reg.inner as u8])),
-            _ => unreachable!(),
-        },
-        "pop" => match arguments.swap_remove(0) {
-            Argument::Reg(reg) => Ok(Instruction::Single([POP | reg.inner as u8])),
-            _ => unreachable!(),
-        },
-        "jnz" => match arguments.swap_remove(0) {
-            Argument::Immediate(imm) => Ok(Instruction::Double([
-                JNZ | IMMEDIATE_MASK,
-                imm.value
-                    .try_into()
-                    .map_err(|_| spanned_error!(imm.span, "immediate out of range"))?,
-            ])),
-            Argument::Expr(expr) => {
-                let imm = eval::eval_expr(expr)?;
-                Ok(Instruction::Double([
-                    JNZ | IMMEDIATE_MASK,
-                    imm.value
-                        .try_into()
-                        .map_err(|_| spanned_error!(imm.span, "immediate out of range"))?,
-                ]))
-            }
-            Argument::Reg(reg) => Ok(Instruction::Single([JNZ | reg.inner as u8])),
-            _ => unreachable!(),
-        },
-        "halt" => Ok(Instruction::Single([HALT])),
-        _ => unreachable!(),
     }
 }
 
@@ -239,36 +502,30 @@ fn compile_instruction(
 ///
 /// Panics if the arguments are not an immediate followed by a register or immediate.
 /// Should be guarded by the calls to [`Instructions::matches`] in [`expand_macros`]
-fn pull_double(mut args: Vec<Argument>, instruction: u8) -> Result<Instruction, Diagnostic> {
-    let first: u8 = match args.swap_remove(0) {
-        Argument::Reg(reg) => reg.inner as u8,
-        _ => unreachable!(),
+fn pull_double(mut args: Vec<Argument>) -> Result<(Register, RegImm), Diagnostic> {
+    let reg = match args.swap_remove(0) {
+        Argument::Reg(reg) => reg.inner,
+        arg => {
+            return Err(spanned_error!(
+                arg.span(),
+                "expected register, found {}",
+                arg.description()
+            ))
+        }
     };
 
-    let second = match args.swap_remove(0) {
-        Argument::Immediate(imm) => RegImm::Immediate(
-            imm.value
-                .try_into()
-                .map_err(|_| spanned_error!(imm.span, "immediate out of range"))?,
-        ),
-        Argument::Expr(expr) => {
-            let imm = eval::eval_expr(expr)?;
-            RegImm::Immediate(
-                imm.value
-                    .try_into()
-                    .map_err(|_| spanned_error!(imm.span, "immediate out of range"))?,
-            )
+    let regimm = match args.swap_remove(0) {
+        Argument::Reg(reg) => RegImm::Register(reg.inner),
+        arg => {
+            return Err(spanned_error!(
+                arg.span(),
+                "expected register or immediate, found {}",
+                arg.description()
+            ))
         }
-        Argument::Reg(reg) => RegImm::Register(reg),
-        _ => unreachable!(),
     };
 
-    Ok(match second {
-        RegImm::Register(reg) => Instruction::Double([instruction | first as u8, reg.inner as u8]),
-        RegImm::Immediate(imm) => {
-            Instruction::Double([instruction | IMMEDIATE_MASK | first as u8, imm])
-        }
-    })
+    Ok((reg, regimm))
 }
 
 /// # Panics
@@ -421,26 +678,26 @@ fn pull_reference(
 }
 
 #[derive(Debug, Clone, Copy)]
-enum Instruction {
+enum Bytes {
     Single([u8; 1]),
     Double([u8; 2]),
     Triple([u8; 3]),
 }
 
-impl Deref for Instruction {
+impl Deref for Bytes {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
         match self {
-            Instruction::Single(byte) => byte.as_slice(),
-            Instruction::Double(bytes) => bytes.as_slice(),
-            Instruction::Triple(bytes) => bytes.as_slice(),
+            Bytes::Single(byte) => byte.as_slice(),
+            Bytes::Double(bytes) => bytes.as_slice(),
+            Bytes::Triple(bytes) => bytes.as_slice(),
         }
     }
 }
 
 fn compile(
-    stream: Vec<CSeg>,
+    stream: Vec<ExpSeg>,
     data: HashMap<String, (u16, Arc<Span>)>,
 ) -> Result<[u8; 1 << 16], Errors> {
     let mut program = [0; 1 << 16];
@@ -458,17 +715,17 @@ fn compile(
         };
         let start = pc;
 
-        for expr in segment.tokens {
+        for expr in segment.instructions {
             match expr {
                 ExpTok::Instruction(inst) => {
-                    let inst = match compile_instruction(inst, pc, &data, &labels) {
+                    let inst = match inst.compile(pc, &data, &labels) {
                         Ok(inst) => inst,
                         Err(err) => {
                             errors.push(err);
                             continue;
                         }
                     };
-                    
+
                     for byte in inst.into_iter() {
                         program[pc as usize] = *byte;
                         pc += 1;
@@ -511,6 +768,7 @@ fn compile(
 
 enum RegImm {
     Immediate(u8),
+    Expr(Parenthesized<TokenStream>),
     Register(Register),
 }
 
@@ -582,10 +840,7 @@ pub fn assemble_data(stream: Vec<DSeg>) -> Result<HashMap<String, (u16, Arc<Span
     }
 }
 
-fn expand_macro(inst: Inst, macros: &HashMap<String, Macro>) -> Result<Vec<ExpTok>, Diagnostic> {
-    let def = macros
-        .get(&inst.name.value)
-        .ok_or_else(|| spanned_error!(inst.name.span.clone(), "instruction not found with the given arguments"))?;
+fn expand_macro(inst: Inst, def: &Macro) -> Result<Vec<ParseTok>, Diagnostic> {
     let span = inst
         .args
         .fl()
@@ -602,20 +857,31 @@ fn expand_macro(inst: Inst, macros: &HashMap<String, Macro>) -> Result<Vec<ExpTo
     def.expand(span, &inst.args.into_values())
 }
 
-fn expand_macros(code: &mut Vec<CSeg>, macros: HashMap<String, Macro>) -> Result<(), Errors> {
+fn expand_macros(code: Vec<CSeg>, macros: HashMap<String, Macro>) -> Result<Vec<ExpSeg>, Errors> {
     let mut errors = Errors::new();
+    let mut segments = Vec::new();
 
-    for segment in code {
+    for mut segment in code {
         let mut position = 0;
+        let mut exp = ExpSeg {
+            cseg: segment.cseg,
+            org: segment.org,
+            instructions: Vec::new(),
+        };
+
         while let Some(expr) = segment.tokens.get(position) {
-            if let ExpTok::Instruction(inst) = expr {
-                if !INSTRUCTIONS.matches(&inst) {
-                    match expand_macro(inst.clone(), &macros) {
-                        Ok(expanded) => {
-                            segment.tokens.splice(position..=position, expanded);
-                        }
-                        Err(err) => errors.push(err),
-                    }
+            if let ParseTok::Instruction(inst) = expr {
+                match Instruction::try_from(inst.clone()) {
+                    Ok(instruction) => exp.instructions.push(ExpTok::Instruction(instruction)),
+                    Err(err) => match macros.get(&inst.name.value) {
+                        Some(def) => match expand_macro(inst.clone(), def) {
+                            Ok(expanded) => {
+                                segment.tokens.splice(position..=position, expanded);
+                            }
+                            Err(_) => errors.push(err),
+                        },
+                        None => errors.push(err),
+                    },
                 }
             }
             position += 1;
@@ -623,14 +889,39 @@ fn expand_macros(code: &mut Vec<CSeg>, macros: HashMap<String, Macro>) -> Result
     }
 
     if errors.is_empty() {
-        Ok(())
+        Ok(segments)
     } else {
         Err(errors)
     }
 }
 
+enum ExpTok {
+    Instruction(Instruction),
+    Label(Label),
+    Bytes(Vec<u8>),
+}
+
+struct ExpSeg {
+    cseg: Option<Token![@cseg]>,
+    org: Option<Immediate>,
+    instructions: Vec<ExpTok>,
+}
+
+impl ExpSeg {
+    pub fn origin(&self, default: u16) -> Result<u16, Diagnostic> {
+        self.org
+            .as_ref()
+            .map(|org| {
+                org.value
+                    .try_into()
+                    .map_err(|_| spanned_error!(org.span.clone(), "segment origin out of range"))
+            })
+            .unwrap_or(Ok(default))
+    }
+}
+
 pub fn assemble(mut ctx: ParseStream) -> Result<[u8; 1 << 16], Errors> {
     let data = assemble_data(ctx.data)?;
-    expand_macros(&mut ctx.code, ctx.macros)?;
-    compile(ctx.code, data)
+    let expanded = expand_macros(ctx.code, ctx.macros)?;
+    compile(expanded, data)
 }

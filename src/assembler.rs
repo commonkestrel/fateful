@@ -10,14 +10,11 @@ pub mod lex;
 mod parse;
 mod token;
 pub use crate::diagnostic::{Diagnostic, OptionalScream, ResultScream};
-use crate::{ note, error };
+use crate::{error, note};
 
 use colored::Colorize;
 
-use std::{
-    time::Instant,
-    sync::OnceLock
-};
+use std::{sync::OnceLock, time::Instant};
 
 use clap::Args;
 use clap_verbosity_flag::{Level, WarnLevel};
@@ -70,11 +67,15 @@ pub async fn assemble(
     args.output
         .finish()
         .map_err(|err| vec![error!("failed to finalize output: {err}")])?;
-    
+
     let elapsed = start.elapsed().as_millis();
     let seconds = elapsed / 1000;
     let millis = elapsed % 1000;
-    println!("    {} assembling `{}` in {seconds}.{millis:03}s", "Finished".green().bold(), input.trim_matches('"'));
+    println!(
+        "    {} assembling `{}` in {seconds}.{millis:03}s",
+        "Finished".green().bold(),
+        input.trim_matches('"')
+    );
 
     Ok(())
 }
