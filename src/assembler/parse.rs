@@ -49,7 +49,7 @@ impl<T, S> Punctuated<T, S> {
         self.first()
             .map(|first| unsafe { (first, self.last().unwrap_unchecked()) })
     }
-    
+
     pub fn values<'a>(&'a self) -> Box<dyn Iterator<Item = &T> + 'a> {
         Box::new(self.list.iter().map(|pair| &pair.0).chain(self.last.iter()))
     }
@@ -698,10 +698,6 @@ fn expand_preproc(peek: Token, ctx: &mut Context) -> Result<(), Errors> {
             let start = ctx.cursor.position;
             ctx.cursor.position += 1;
             let path = ctx
-                .cursor
-                .parse()
-                .map_err(|err| Into::<Errors>::into(err))?;
-            let _: NewLine = ctx
                 .cursor
                 .parse()
                 .map_err(|err| Into::<Errors>::into(err))?;
