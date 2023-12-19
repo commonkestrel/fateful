@@ -66,7 +66,7 @@ cmp:
 .imm:
     po | aoh
 .both:
-    ao | aoh | aom | cr | pci
+    ao | aol | cr | pci
 
 mv:
     li
@@ -134,20 +134,17 @@ pop:
     li
     spi
     lsp
-    rsb | rbo | sa | cr | pci
+    rsb | rbi | la | cr | pci
 
 jnz:
+    li
 .reg:
-    li
     rsb | rbo | aom | aol
-    aom
-    jnz | cr
+    aom | jnz | cr
 .imm:
-    li
     pci
     po | aom | aol
-    aom
-    jnz | cr
+    aom | jnz | cr
 
 halt:
     li
