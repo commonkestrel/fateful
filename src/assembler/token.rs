@@ -1,8 +1,6 @@
-use std::sync::Arc;
-
 use super::ascii::AsciiStr;
-use super::lex::{self, Delimeter, PreProc, Punctuation, Span, Token, TokenInner, TokenStream};
-use super::parse::{Context, Cursor, Parsable};
+use super::lex::{self, Delimeter, PreProc, Punctuation, Token, TokenInner, TokenStream};
+use super::parse::{Cursor, Parsable};
 use super::Diagnostic;
 use crate::{error, spanned_error};
 
@@ -180,18 +178,16 @@ parsable! {
     doc string; match Doc(md) => Doc{pub md: String},
 }
 
-#[derive(Debug)]
-pub struct NewLine {
-    span: Arc<Span>,
-}
+#[derive(Debug, Clone, Copy)]
+pub struct NewLine;
 
 impl Parsable for NewLine {
     fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
         match cursor.next() {
             Some(Token {
-                span,
+                span: _,
                 inner: TokenInner::NewLine,
-            }) => Ok(NewLine { span }),
+            }) => Ok(NewLine),
             Some(tok) => Err(spanned_error!(
                 tok.span,
                 "expected newline, found {}",

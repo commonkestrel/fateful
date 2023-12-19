@@ -78,7 +78,7 @@ pub fn eval_expr(
 
 pub fn eval_bracketed(
     tokens: Bracketed<TokenStream>,
-    variables: &HashMap<String, (u16, Arc<Span>)>,
+    locations: &HashMap<String, (u16, Arc<Span>)>,
 ) -> Result<Immediate, Diagnostic> {
     let span = Arc::new(Span {
         line: tokens.open.span.line,
@@ -91,7 +91,7 @@ pub fn eval_bracketed(
             .with_help("expressions must evaluate to a number"));
     }
 
-    Tree::parse(&tokens, &HashMap::new(), &HashMap::new(), variables).map(|tree| Immediate {
+    Tree::parse(&tokens, &HashMap::new(), locations, locations).map(|tree| Immediate {
         value: tree.eval(),
         span,
     })
@@ -439,11 +439,6 @@ impl fmt::Display for Tree {
             T::CmpOr(bin) => write!(f, "({}||{})", bin.left, bin.right),
         }
     }
-}
-
-enum Definitions<'a> {
-    Defines(&'a HashMap<String, TokenStream>),
-    Variables(&'a HashMap<String, (u16, Arc<Span>)>),
 }
 
 #[cfg(test)]

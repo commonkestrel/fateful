@@ -19,7 +19,7 @@ use super::{
 use crate::{
     assembler::token::Error,
     diagnostic::{Diagnostic, Reference},
-    error, note, spanned_error, Token,
+    error, spanned_error, Token,
 };
 
 use std::{collections::HashMap, iter, str::FromStr, sync::Arc};
@@ -49,11 +49,7 @@ impl<T, S> Punctuated<T, S> {
         self.first()
             .map(|first| unsafe { (first, self.last().unwrap_unchecked()) })
     }
-
-    pub fn len(&self) -> usize {
-        self.list.len() + if self.last.is_some() { 1 } else { 0 }
-    }
-
+    
     pub fn values<'a>(&'a self) -> Box<dyn Iterator<Item = &T> + 'a> {
         Box::new(self.list.iter().map(|pair| &pair.0).chain(self.last.iter()))
     }
@@ -219,11 +215,6 @@ impl Segment {
     }
 }
 
-struct PostProc {
-    macros: Vec<Macro>,
-    variables: HashMap<String, u16>,
-}
-
 #[derive(Debug)]
 pub struct DSeg {
     pub dseg: token::Dseg,
@@ -235,7 +226,7 @@ impl DSeg {
     pub fn size(&self) -> Result<u16, Diagnostic> {
         let mut size: u16 = 0;
 
-        for (name, (var_size, span)) in self.variables.iter() {
+        for (_, (var_size, span)) in self.variables.iter() {
             size = size.checked_add(*var_size).ok_or_else(|| {
                 spanned_error!(span.clone(), "data segment out of range")
                     .with_help("make sure your variables can be stored in less than 2^16 bytes.")
@@ -243,19 +234,6 @@ impl DSeg {
         }
 
         Ok(size)
-    }
-
-    pub fn range(&self, ptr: u16) -> Result<std::ops::Range<u16>, Diagnostic> {
-        let origin = match self.org {
-            Some(ref imm) => imm
-                .value
-                .try_into()
-                .map_err(|_| spanned_error!(imm.span.clone(), "segment origin out of range"))?,
-            None => ptr,
-        };
-        let top = origin + self.size()?;
-
-        Ok(origin..top)
     }
 }
 
@@ -324,16 +302,6 @@ pub struct Context {
     pub cursor: Cursor,
 }
 
-impl Context {
-    pub fn peek<'a>(&'a self) -> Option<&'a Token> {
-        self.cursor.peek()
-    }
-
-    fn parse<R: Parsable>(&mut self) -> Result<R, Diagnostic> {
-        self.cursor.parse()
-    }
-}
-
 #[derive(Debug)]
 pub enum ParseTok {
     Label(Label),
@@ -345,7 +313,7 @@ impl ParseTok {
     fn bytes_literal<T: TryFrom<i128>>(cursor: &mut Cursor) -> Result<T, Diagnostic> {
         match cursor.peek() {
             Some(Token {
-                span,
+                span: _,
                 inner: TokenInner::Delimeter(Delimeter::OpenParen),
             }) => {
                 let expr = parenthesized!(cursor)?;
@@ -399,7 +367,7 @@ impl Parsable for ParseTok {
     fn parse(cursor: &mut Cursor) -> Result<Self, Diagnostic> {
         match cursor.peek() {
             Some(Token {
-                span,
+                span: _,
                 inner: TokenInner::Ident(lex::Ident::PreProc(PreProc::Str)),
             }) => {
                 cursor.position += 1;
@@ -409,7 +377,7 @@ impl Parsable for ParseTok {
                 Ok(ParseTok::Bytes(val.value.into_bytes()))
             }
             Some(Token {
-                span,
+                span: _,
                 inner: TokenInner::Ident(lex::Ident::PreProc(PreProc::Byte)),
             }) => {
                 cursor.position += 1;
@@ -417,7 +385,7 @@ impl Parsable for ParseTok {
                 Ok(ParseTok::Bytes(vec![byte]))
             }
             Some(Token {
-                span,
+                span: _,
                 inner: TokenInner::Ident(lex::Ident::PreProc(PreProc::Double)),
             }) => {
                 cursor.position += 1;
@@ -425,7 +393,7 @@ impl Parsable for ParseTok {
                 Ok(ParseTok::Bytes(bytes.to_be_bytes().to_vec()))
             }
             Some(Token {
-                span,
+                span: _,
                 inner: TokenInner::Ident(lex::Ident::PreProc(PreProc::Quad)),
             }) => {
                 cursor.position += 1;
@@ -462,7 +430,7 @@ pub struct Inst {
     pub args: Punctuated<Argument, Token![,]>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Label {
     pub name: Ident,
     pub colon: Token![:],
@@ -745,8 +713,14 @@ fn expand_preproc(peek: Token, ctx: &mut Context) -> Result<(), Errors> {
             ctx.cursor.position = start;
         }
         TI::Ident(lex::Ident::PreProc(PreProc::Error)) => {
-            let error: Error = ctx.parse().map_err(|err| Into::<Errors>::into(err))?;
-            let str: LitString = ctx.parse().map_err(|err| Into::<Errors>::into(err))?;
+            let error: Error = ctx
+                .cursor
+                .parse()
+                .map_err(|err| Into::<Errors>::into(err))?;
+            let str: LitString = ctx
+                .cursor
+                .parse()
+                .map_err(|err| Into::<Errors>::into(err))?;
             return Err(vec![spanned_error!(error.span, "{}", str.value)]);
         }
         TI::Ident(lex::Ident::Ident(value)) => {

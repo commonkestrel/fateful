@@ -10,7 +10,7 @@ pub mod lex;
 mod parse;
 mod token;
 pub use crate::diagnostic::{Diagnostic, OptionalScream, ResultScream};
-use crate::{error, note};
+use crate::error;
 
 use colored::Colorize;
 

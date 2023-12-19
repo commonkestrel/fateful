@@ -490,8 +490,6 @@ impl From<u8> for Instruction {
 
 use __head::InstructionHeader;
 
-use crate::note;
-
 /// Seperated into a seperate module to get rid of
 /// the dead code warning that was driving me crazy.
 #[allow(dead_code)]

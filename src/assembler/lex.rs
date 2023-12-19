@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use super::ascii::{unescape_str, AsciiStr, UnescapeError};
 use super::Errors;
-use crate::{diagnostic::Diagnostic, error, note};
+use crate::{diagnostic::Diagnostic, error};
 use clio::{ClioPath, Input};
 use logos::{Lexer, Logos};
 
@@ -209,7 +209,7 @@ pub enum TokenInner {
     #[regex(r##"r#"((\\")|[\x00-\x21\x23-\x7F])*"#"##, TokenInner::raw_string)]
     String(AsciiStr),
 
-    #[regex(r"[._a-zA-Z][_a-zA-Z0-9]*", Ident::any)]
+    #[regex(r"[._a-zA-Z][._a-zA-Z0-9]*", Ident::any)]
     #[regex(r"@[_a-zA-Z][_a-zA-Z0-9]*", Ident::pre_proc)]
     #[regex(r"%[_a-zA-Z][_a-zA-Z0-9]*", Ident::macro_variable)]
     #[regex(r"\$[_a-zA-Z][_a-zA-Z0-9]*", Ident::variable)]
