@@ -1,4 +1,4 @@
-use std::ops::Deref;
+use std::ops::{Deref, Range};
 use std::sync::Arc;
 
 use crate::{
@@ -15,15 +15,11 @@ use crate::{
 use super::{
     lex::Register,
     lex::TokenStream,
-    parse::{
-        Argument, Bracketed, CSeg, Inst, Label, Macro, Parenthesized, ParseStream, ParseTok, Types,
-    },
+    parse::{Argument, Bracketed, CSeg, Inst, Label, Macro, Parenthesized, ParseStream, ParseTok},
     Diagnostic, Errors,
 };
 
 use std::collections::HashMap;
-
-use phf::{phf_map, Map};
 
 const IMMEDIATE_MASK: u8 = 0b0000_1000;
 const ADD: u8 = 0x00;
@@ -42,59 +38,6 @@ const PUSH: u8 = 0xC0;
 const POP: u8 = 0xD0;
 const JNZ: u8 = 0xE0;
 const HALT: u8 = 0xF0;
-
-static INSTRUCTIONS: Instructions = Instructions::new(phf_map! {
-    "add" => &[&[Types::REG, Types::REG.union(Types::IMM)]],
-    "sub" => &[&[Types::REG, Types::REG.union(Types::IMM)]],
-    "adc" => &[&[Types::REG, Types::REG.union(Types::IMM)]],
-    "sbc" => &[&[Types::REG, Types::REG.union(Types::IMM)]],
-    "nand" => &[&[Types::REG, Types::REG.union(Types::IMM)]],
-    "or" => &[&[Types::REG, Types::REG.union(Types::IMM)]],
-    "cmp" => &[&[Types::REG, Types::REG.union(Types::IMM)]],
-    "mv" => &[&[Types::REG, Types::REG.union(Types::IMM)]],
-    "ld" => &[&[Types::REG], &[Types::REG, Types::ADDR]],
-    "st" => &[&[Types::REG], &[Types::ADDR, Types::REG]],
-    "lda" => &[&[Types::ADDR.union(Types::LABEL)]],
-    "lpm" => &[&[Types::REG], &[Types::REG, Types::LABEL]],
-    "push" => &[&[Types::REG.union(Types::IMM)]],
-    "pop" => &[&[Types::REG]],
-    "jnz" => &[&[Types::REG.union(Types::IMM)]],
-    "halt" => &[&[]],
-});
-
-#[repr(transparent)]
-struct Instructions {
-    matches: Map<&'static str, &'static [&'static [Types]]>,
-}
-
-impl Instructions {
-    const fn new(matches: Map<&'static str, &'static [&'static [Types]]>) -> Self {
-        Instructions { matches }
-    }
-
-    fn matches(&self, inst: &Inst) -> bool {
-        if let Some(builtin) = INSTRUCTIONS.matches.get(&inst.name.value) {
-            builtin.iter().any(|matches| {
-                if matches.len() != inst.args.len() {
-                    return false;
-                }
-
-                inst.args
-                    .values()
-                    .zip(matches.iter())
-                    .all(|(argument, types)| match argument {
-                        Argument::Addr(_) => types.intersects(Types::LABEL | Types::ADDR),
-                        Argument::Expr(_) | Argument::Immediate(_) => types.contains(Types::IMM),
-                        Argument::Reg(_) => types.contains(Types::REG),
-                        Argument::Ident(_) => types.contains(Types::IDENT),
-                        Argument::Str(_) => types.contains(Types::STR),
-                    })
-            })
-        } else {
-            false
-        }
-    }
-}
 
 enum Instruction {
     Add(Register, RegImm),
@@ -152,36 +95,112 @@ impl Instruction {
     fn compile(
         self,
         pc: u16,
+        parent: &str,
         data: &HashMap<String, (u16, Arc<Span>)>,
         labels: &HashMap<String, (u16, Arc<Span>)>,
     ) -> Result<Bytes, Diagnostic> {
         match self {
             Instruction::Add(reg, regimm) => {
-                Instruction::compile_double(ADD, reg, regimm, labels, data)
+                Instruction::compile_double(ADD, reg, regimm, pc, parent, labels, data)
             }
             Instruction::Sub(reg, regimm) => {
-                Instruction::compile_double(SUB, reg, regimm, labels, data)
+                Instruction::compile_double(SUB, reg, regimm, pc, parent, labels, data)
             }
             Instruction::Adc(reg, regimm) => {
-                Instruction::compile_double(ADC, reg, regimm, labels, data)
+                Instruction::compile_double(ADC, reg, regimm, pc, parent, labels, data)
             }
             Instruction::Sbc(reg, regimm) => {
-                Instruction::compile_double(SBC, reg, regimm, labels, data)
+                Instruction::compile_double(SBC, reg, regimm, pc, parent, labels, data)
             }
             Instruction::Nand(reg, regimm) => {
-                Instruction::compile_double(NAND, reg, regimm, labels, data)
+                Instruction::compile_double(NAND, reg, regimm, pc, parent, labels, data)
             }
             Instruction::Or(reg, regimm) => {
-                Instruction::compile_double(OR, reg, regimm, labels, data)
+                Instruction::compile_double(OR, reg, regimm, pc, parent, labels, data)
             }
             Instruction::Cmp(reg, regimm) => {
-                Instruction::compile_double(CMP, reg, regimm, labels, data)
+                Instruction::compile_double(CMP, reg, regimm, pc, parent, labels, data)
             }
             Instruction::Mv(reg, regimm) => {
-                Instruction::compile_double(MV, reg, regimm, labels, data)
+                Instruction::compile_double(MV, reg, regimm, pc, parent, labels, data)
             }
+            Instruction::LdHl(reg) => Ok(Bytes::Single([LD | reg as u8])),
+            Instruction::LdAddr(reg, expr) => {
+                let addr = Instruction::eval_address(expr, data)?;
+                Ok(Bytes::Triple([
+                    LD | IMMEDIATE_MASK | reg as u8,
+                    (addr >> 8) as u8,
+                    (addr & 0xFF) as u8,
+                ]))
+            }
+            Instruction::StHl(reg) => Ok(Bytes::Single([ST | reg as u8])),
+            Instruction::StAddr(expr, reg) => {
+                let addr = Instruction::eval_address(expr, data)?;
+                Ok(Bytes::Triple([
+                    ST | IMMEDIATE_MASK | reg as u8,
+                    (addr >> 8) as u8,
+                    (addr & 0xFF) as u8,
+                ]))
+            }
+            Instruction::Lda(expr) => {
+                let addr = Instruction::eval_either(expr, pc, parent, labels, data)?;
+                Ok(Bytes::Triple([
+                    LDA | IMMEDIATE_MASK,
+                    (addr >> 8) as u8,
+                    (addr & 0xFF) as u8,
+                ]))
+            }
+            Instruction::LpmHl(reg) => Ok(Bytes::Single([LPM | reg as u8])),
+            Instruction::LpmAddr(reg, expr) => {
+                let addr = Instruction::eval_reference(expr, pc, parent, labels)?;
+                Ok(Bytes::Triple([
+                    LPM | IMMEDIATE_MASK | reg as u8,
+                    (addr >> 8) as u8,
+                    (addr & 0xFF) as u8,
+                ]))
+            }
+            Instruction::Push(regimm) => match regimm {
+                RegImm::Register(reg) => Ok(Bytes::Single([PUSH | reg as u8])),
+                RegImm::Immediate(imm) => Ok(Bytes::Double([PUSH | IMMEDIATE_MASK, imm])),
+                RegImm::Expr(mut expr) => {
+                    Instruction::expand_expr(&mut expr.inner, pc, parent);
+                    let span = Span::same_line(&expr.open.span, &expr.close.span);
+                    Ok(Bytes::Double([
+                        PUSH | IMMEDIATE_MASK,
+                        eval::eval_expr(expr, labels, data)?
+                            .value
+                            .try_into()
+                            .map_err(|_| spanned_error!(span, "immediate out of range"))?,
+                    ]))
+                }
+            },
+            Instruction::Pop(reg) => Ok(Bytes::Single([POP | reg as u8])),
+            Instruction::Jnz(regimm) => match regimm {
+                RegImm::Register(reg) => Ok(Bytes::Single([JNZ | reg as u8])),
+                RegImm::Immediate(imm) => Ok(Bytes::Double([JNZ | IMMEDIATE_MASK, imm])),
+                RegImm::Expr(mut expr) => {
+                    Instruction::expand_expr(&mut expr.inner, pc, parent);
+                    let span = Span::same_line(&expr.open.span, &expr.close.span);
+                    Ok(Bytes::Double([
+                        JNZ | IMMEDIATE_MASK,
+                        eval::eval_expr(expr, labels, data)?
+                            .value
+                            .try_into()
+                            .map_err(|_| spanned_error!(span, "immediate out of range"))?,
+                    ]))
+                }
+            },
             Instruction::Halt => Ok(Bytes::Single([HALT])),
-            _ => todo!(),
+        }
+    }
+
+    fn expand_expr(expr: &mut [Token], pc: u16, parent: &str) {
+        for tok in expr.iter_mut() {
+            if let TokenInner::Location = tok.inner {
+                tok.inner = TokenInner::Immediate(pc as i128);
+            } else if let TokenInner::Ident(Ident::Ident(ref mut name)) = tok.inner {
+                *name = parent.to_owned() + name;
+            }
         }
     }
 
@@ -189,13 +208,17 @@ impl Instruction {
         instruction: u8,
         reg: Register,
         regimm: RegImm,
+        pc: u16,
+        parent: &str,
         labels: &HashMap<String, (u16, Arc<Span>)>,
         data: &HashMap<String, (u16, Arc<Span>)>,
     ) -> Result<Bytes, Diagnostic> {
         match regimm {
-            RegImm::Register(second) => Ok(Bytes::Double([ADD | reg as u8, second as u8])),
-            RegImm::Immediate(imm) => Ok(Bytes::Double([ADD | IMMEDIATE_MASK | reg as u8, imm])),
-            RegImm::Expr(expr) => {
+            RegImm::Register(second) => Ok(Bytes::Double([instruction | reg as u8, second as u8])),
+            RegImm::Immediate(imm) => Ok(Bytes::Double([instruction | IMMEDIATE_MASK | reg as u8, imm])),
+            RegImm::Expr(mut expr) => {
+                Instruction::expand_expr(&mut expr.inner, pc, parent);
+
                 let expr_span = Span::same_line(&expr.open.span, &expr.close.span);
                 Ok(Bytes::Double([
                     instruction | IMMEDIATE_MASK | reg as u8,
@@ -207,12 +230,120 @@ impl Instruction {
             }
         }
     }
+
+    fn eval_reference(
+        mut expr: Bracketed<TokenStream>,
+        pc: u16,
+        parent: &str,
+        labels: &HashMap<String, (u16, Arc<Span>)>,
+    ) -> Result<u16, Diagnostic> {
+        for tok in expr.inner.iter_mut() {
+            if let TokenInner::Location = tok.inner {
+                tok.inner = TokenInner::Immediate(pc as i128);
+            } else if let TokenInner::Ident(Ident::Ident(ref mut name)) = tok.inner {
+                if name.starts_with('.') {
+                    *name = parent.to_owned() + name;
+                }
+            } else if let TokenInner::Ident(Ident::Variable(_)) = tok.inner {
+                return Err(spanned_error!(
+                    tok.span.clone(),
+                    "unexpected variable in program address"
+                ));
+            }
+        }
+
+        let addr = eval::eval_bracketed(expr, labels)?;
+        addr.value
+            .try_into()
+            .map_err(|_| spanned_error!(addr.span, "address not in range"))
+    }
+
+    fn eval_address(
+        mut expr: Bracketed<TokenStream>,
+        variables: &HashMap<String, (u16, Arc<Span>)>,
+    ) -> Result<u16, Diagnostic> {
+        for tok in expr.inner.iter_mut() {
+            if let TokenInner::Location = tok.inner {
+                return Err(spanned_error!(
+                    tok.span.clone(),
+                    "unexpected program location in memory address"
+                ));
+            } else if let TokenInner::Ident(Ident::Ident(_)) = tok.inner {
+                return Err(spanned_error!(
+                    tok.span.clone(),
+                    "unexpected label in memory address"
+                ));
+            }
+        }
+
+        let addr = eval::eval_bracketed(expr, variables)?;
+        addr.value
+            .try_into()
+            .map_err(|_| spanned_error!(addr.span, "address not in range"))
+    }
+
+    fn eval_either(
+        mut expr: Bracketed<TokenStream>,
+        pc: u16,
+        parent: &str,
+        labels: &HashMap<String, (u16, Arc<Span>)>,
+        variables: &HashMap<String, (u16, Arc<Span>)>,
+    ) -> Result<u16, Diagnostic> {
+        let mut mem = None;
+        let mut prog = None;
+
+        for tok in expr.inner.iter_mut() {
+            if let TokenInner::Ident(Ident::Ident(ref mut name)) = tok.inner {
+                if let Some(prev) = mem {
+                    return Err(Diagnostic::referencing_error(
+                        tok.span.clone(),
+                        "unexpected label in memory address",
+                        Reference::new(prev, "interpreted as memory address due to this reference"),
+                    ));
+                }
+                prog.get_or_insert(tok.span.clone());
+
+                if name.starts_with('.') {
+                    *name = parent.to_owned() + name;
+                }
+            } else if let TokenInner::Ident(Ident::Variable(_)) = tok.inner {
+                if let Some(prev) = prog {
+                    return Err(Diagnostic::referencing_error(
+                        tok.span.clone(),
+                        "unexpected variable in program address",
+                        Reference::new(
+                            prev,
+                            "interpreted as program address due to this reference",
+                        ),
+                    ));
+                }
+                mem.get_or_insert(tok.span.clone());
+            } else if let TokenInner::Location = tok.inner {
+                if let Some(prev) = mem {
+                    return Err(Diagnostic::referencing_error(
+                        tok.span.clone(),
+                        "unexpected program location in memory address",
+                        Reference::new(prev, "interpreted as memory address due to this reference"),
+                    ));
+                }
+                prog.get_or_insert(tok.span.clone());
+
+                tok.inner = TokenInner::Immediate(pc as i128);
+            }
+        }
+
+        let evaled = eval::eval_bracketed(expr, if mem.is_some() { variables } else { labels })?;
+        evaled
+            .value
+            .try_into()
+            .map_err(|_| spanned_error!(evaled.span, "address not in range"))
+    }
 }
 
 impl TryFrom<Inst> for Instruction {
     type Error = Diagnostic;
 
-    fn try_from(mut value: Inst) -> Result<Self, Self::Error> {
+    fn try_from(value: Inst) -> Result<Self, Self::Error> {
         let mut args = value.args.into_values();
         match value.name.value.as_str() {
             "add" => {
@@ -447,6 +578,12 @@ impl TryFrom<Inst> for Instruction {
             "push" => {
                 let regimm = match args.swap_remove(0) {
                     Argument::Reg(reg) => RegImm::Register(reg.inner),
+                    Argument::Immediate(imm) => RegImm::Immediate(
+                        imm.value
+                            .try_into()
+                            .map_err(|_| spanned_error!(imm.span, "immediate out of range"))?,
+                    ),
+                    Argument::Expr(expr) => RegImm::Expr(expr),
                     arg => {
                         return Err(spanned_error!(
                             arg.span(),
@@ -475,6 +612,12 @@ impl TryFrom<Inst> for Instruction {
             "jnz" => {
                 let regimm = match args.swap_remove(0) {
                     Argument::Reg(reg) => RegImm::Register(reg.inner),
+                    Argument::Immediate(imm) => RegImm::Immediate(
+                        imm.value
+                            .try_into()
+                            .map_err(|_| spanned_error!(imm.span, "immediate out of range"))?,
+                    ),
+                    Argument::Expr(expr) => RegImm::Expr(expr),
                     arg => {
                         return Err(spanned_error!(
                             arg.span(),
@@ -516,6 +659,12 @@ fn pull_double(mut args: Vec<Argument>) -> Result<(Register, RegImm), Diagnostic
 
     let regimm = match args.swap_remove(0) {
         Argument::Reg(reg) => RegImm::Register(reg.inner),
+        Argument::Immediate(imm) => RegImm::Immediate(
+            imm.value
+                .try_into()
+                .map_err(|_| spanned_error!(imm.span, "immediate out of range"))?,
+        ),
+        Argument::Expr(expr) => RegImm::Expr(expr),
         arg => {
             return Err(spanned_error!(
                 arg.span(),
@@ -526,155 +675,6 @@ fn pull_double(mut args: Vec<Argument>) -> Result<(Register, RegImm), Diagnostic
     };
 
     Ok((reg, regimm))
-}
-
-/// # Panics
-///
-/// Panics if the provided argument is not of variant [`Argument::Addr`].
-/// Should be guarded by the calls to [`Instructions::matches`] in [`expand_macros`]
-fn pull_address(
-    arg: Argument,
-    data: &HashMap<String, (u16, Arc<Span>)>,
-) -> Result<u16, Diagnostic> {
-    match arg {
-        Argument::Addr(addr) => {
-            for tok in addr.inner.iter() {
-                match tok.inner {
-                    TokenInner::Ident(Ident::Ident(_)) | TokenInner::Location => {
-                        return Err(spanned_error!(
-                            tok.span.clone(),
-                            "unexpected program reference in memory address"
-                        ));
-                    }
-                    _ => {}
-                }
-            }
-
-            let evaluated = eval::eval_bracketed(addr, data)?;
-            evaluated
-                .value
-                .try_into()
-                .map_err(|_| spanned_error!(evaluated.span, "memory address out of range"))
-        }
-        _ => unreachable!(),
-    }
-}
-
-fn pull_either(
-    arg: Argument,
-    data: &HashMap<String, (u16, Arc<Span>)>,
-    labels: &HashMap<String, (u16, Arc<Span>)>,
-    pc: u16,
-) -> Result<u16, Diagnostic> {
-    match arg {
-        Argument::Addr(mut addr) => {
-            let mut mem = None;
-            let mut prog = None;
-
-            for tok in addr.inner.iter_mut() {
-                if let Token {
-                    span,
-                    inner: TokenInner::Ident(Ident::Ident(val)),
-                } = tok
-                {
-                    if let Some(prev) = mem {
-                        return Err(Diagnostic::referencing_error(
-                            span.clone(),
-                            "unexpected label in memory address",
-                            Reference::new(
-                                prev,
-                                "interpreted as memory address due to this reference",
-                            ),
-                        ));
-                    }
-                    prog.get_or_insert(span.clone());
-
-                    let label = labels.get(val).ok_or_else(|| {
-                        spanned_error!(span.clone(), "unrecognized identifier in expression")
-                    })?;
-                    tok.inner = TokenInner::Immediate(label.0 as i128);
-                } else if let Token {
-                    span,
-                    inner: TokenInner::Ident(Ident::Variable(var)),
-                } = tok
-                {
-                    if let Some(prev) = prog {
-                        return Err(Diagnostic::referencing_error(
-                            span.clone(),
-                            "unexpected variable in program address",
-                            Reference::new(
-                                prev,
-                                "interpreted as program address due to this reference",
-                            ),
-                        ));
-                    }
-                    mem.get_or_insert(span.clone());
-
-                    let variable = data.get(var).ok_or_else(|| {
-                        spanned_error!(span.clone(), "variable not found in scope")
-                    })?;
-                    tok.inner = TokenInner::Immediate(variable.0 as i128);
-                } else if let Token {
-                    span,
-                    inner: TokenInner::Location,
-                } = tok
-                {
-                    if let Some(prev) = mem {
-                        return Err(Diagnostic::referencing_error(
-                            span.clone(),
-                            "unexpected program location in memory address",
-                            Reference::new(
-                                prev,
-                                "interpreted as memory address due to this reference",
-                            ),
-                        ));
-                    }
-                    prog.get_or_insert(span.clone());
-
-                    tok.inner = TokenInner::Immediate(pc as i128);
-                }
-            }
-
-            let evaled = eval::eval_bracketed(addr, &HashMap::new())?;
-            evaled
-                .value
-                .try_into()
-                .map_err(|_| spanned_error!(evaled.span, "address not in range"))
-        }
-        _ => unreachable!(),
-    }
-}
-
-/// # Panics
-///
-/// Panics if the provided argument is not of variant [`Argument::Addr`].
-/// Should be guarded by the calls to [`Instructions::matches`] in [`expand_macros`]
-fn pull_reference(
-    arg: Argument,
-    data: &HashMap<String, (u16, Arc<Span>)>,
-) -> Result<u16, Diagnostic> {
-    match arg {
-        Argument::Addr(addr) => {
-            for tok in addr.inner.iter() {
-                match tok.inner {
-                    TokenInner::Ident(Ident::Variable(_)) => {
-                        return Err(spanned_error!(
-                            tok.span.clone(),
-                            "unexpected variable in program address"
-                        ));
-                    }
-                    _ => {}
-                }
-            }
-
-            let evaluated = eval::eval_bracketed(addr, data)?;
-            evaluated
-                .value
-                .try_into()
-                .map_err(|_| spanned_error!(evaluated.span, "program address out of range"))
-        }
-        _ => unreachable!(),
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -700,12 +700,13 @@ fn compile(
     stream: Vec<ExpSeg>,
     data: HashMap<String, (u16, Arc<Span>)>,
 ) -> Result<[u8; 1 << 16], Errors> {
-    let mut program = [0; 1 << 16];
     let mut errors = Errors::new();
     let mut labels = HashMap::new();
+    let mut ranges: Vec<Range<u16>> = Vec::new();
+    let mut parent = String::new();
     let mut pc: u16 = 0;
 
-    for segment in stream {
+    for segment in stream.iter() {
         pc = match segment.origin(pc) {
             Ok(origin) => origin,
             Err(err) => {
@@ -715,10 +716,80 @@ fn compile(
         };
         let start = pc;
 
+        for expr in segment.instructions.iter() {
+            match expr {
+                ExpTok::Instruction(inst) => pc += inst.size(),
+                ExpTok::Label(label) => {
+                    let name = if label.name.value.starts_with('.') {
+                        parent.to_owned() + &label.name.value
+                    } else {
+                        parent = label.name.value.to_owned();
+                        label.name.value.to_owned()
+                    };
+
+                    let span = label.name.span.clone();
+                    if let Some((_, prev_span)) = labels.insert(name, (pc, label.name.span.clone()))
+                    {
+                        errors.push(Diagnostic::referencing_error(
+                            span,
+                            "duplicate label definitions",
+                            Reference::new(prev_span, "previous definition found here"),
+                        ));
+                    }
+                }
+                ExpTok::Bytes(bytes) => pc += bytes.len() as u16,
+            }
+        }
+
+        let segment_range = start..pc;
+
+        for (i, range) in ranges.iter().enumerate() {
+            if segment_range.start.max(range.start) <= segment_range.end.min(range.end) {
+                errors.push(
+                    match stream[i].cseg {
+                        Some(ref cseg) => Diagnostic::referencing_error(
+                            // this will only be called after the first segment,
+                            // and all segments after the first will have a `cseg` token
+                            unsafe { segment.cseg.as_ref().unwrap_unchecked().span.clone() },
+                            "data segment collision",
+                            Reference::new(
+                                cseg.span.clone(),
+                                "overlaps with this segment")
+                        )
+                        .with_help("segments of the same type cannot overlap; try adjusting the origin or variable sizes"),
+                        None => spanned_error!(
+                            // this will only be called after the first segment,
+                            // and all segments after the first will have a `cseg` token
+                            unsafe { segment.cseg.as_ref().unwrap_unchecked().span.clone() },
+                            "code segment collision"
+                        )
+                        .with_help("collides with the default segment")
+                        .with_help("segments of the same type cannot overlap; try adjusting the origin or variable sizes"),
+                    }
+                )
+            }
+        }
+
+        ranges.push(segment_range);
+    }
+
+    parent.clear();
+    pc = 0;
+    let mut program = [0; 1 << 16];
+
+    for segment in stream {
+        pc = match segment.origin(pc) {
+            Ok(origin) => origin,
+            Err(err) => {
+                errors.push(err);
+                pc
+            }
+        };
+
         for expr in segment.instructions {
             match expr {
                 ExpTok::Instruction(inst) => {
-                    let inst = match inst.compile(pc, &data, &labels) {
+                    let inst = match inst.compile(pc, &parent, &data, &labels) {
                         Ok(inst) => inst,
                         Err(err) => {
                             errors.push(err);
@@ -732,19 +803,8 @@ fn compile(
                     }
                 }
                 ExpTok::Label(label) => {
-                    if !label.name.value.starts_with('.') {
-                        labels.retain(|key, _| !key.starts_with('.'))
-                    }
-
-                    let span = label.name.span.clone();
-                    if let Some((_, prev_span)) =
-                        labels.insert(label.name.value, (pc, label.name.span))
-                    {
-                        errors.push(Diagnostic::referencing_error(
-                            span,
-                            "duplicate label definitions",
-                            Reference::new(prev_span, "previous definition found here"),
-                        ))
+                    if !label.name.value.contains('.') {
+                        parent = label.name.value;
                     }
                 }
                 ExpTok::Bytes(bytes) => {
@@ -755,8 +815,6 @@ fn compile(
                 }
             }
         }
-
-        let range = start..pc;
     }
 
     if errors.is_empty() {
@@ -870,22 +928,27 @@ fn expand_macros(code: Vec<CSeg>, macros: HashMap<String, Macro>) -> Result<Vec<
         };
 
         while let Some(expr) = segment.tokens.get(position) {
-            if let ParseTok::Instruction(inst) = expr {
-                match Instruction::try_from(inst.clone()) {
+            match expr {
+                ParseTok::Instruction(inst) => match Instruction::try_from(inst.clone()) {
                     Ok(instruction) => exp.instructions.push(ExpTok::Instruction(instruction)),
                     Err(err) => match macros.get(&inst.name.value) {
                         Some(def) => match expand_macro(inst.clone(), def) {
                             Ok(expanded) => {
                                 segment.tokens.splice(position..=position, expanded);
+                                continue;
                             }
                             Err(_) => errors.push(err),
                         },
                         None => errors.push(err),
                     },
-                }
+                },
+                ParseTok::Label(lab) => exp.instructions.push(ExpTok::Label(lab.clone())),
+                ParseTok::Bytes(bytes) => exp.instructions.push(ExpTok::Bytes(bytes.clone())),
             }
             position += 1;
         }
+
+        segments.push(exp);
     }
 
     if errors.is_empty() {
@@ -920,7 +983,7 @@ impl ExpSeg {
     }
 }
 
-pub fn assemble(mut ctx: ParseStream) -> Result<[u8; 1 << 16], Errors> {
+pub fn assemble(ctx: ParseStream) -> Result<[u8; 1 << 16], Errors> {
     let data = assemble_data(ctx.data)?;
     let expanded = expand_macros(ctx.code, ctx.macros)?;
     compile(expanded, data)
