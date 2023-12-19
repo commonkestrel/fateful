@@ -98,9 +98,10 @@ enum Instruction {
     Ld = 0x8,
     St = 0x9,
     Lda = 0xA,
-    Push = 0xB,
-    Pop = 0xC,
-    Jnz = 0xD,
+    Lpm = 0xB,
+    Push = 0xC,
+    Pop = 0xD,
+    Jnz = 0xE,
     Halt = 0xF,
 }
 
@@ -178,8 +179,10 @@ bitflags! {
         const AHI = 1 << 20;
         /// Load Stack Pointer
         const LSP = 1 << 21;
+        /// Load Program Memory
+        const LPM = 1 << 22;
         /// Set Halt
-        const SH = 1 << 22;
+        const SH = 1 << 23;
     }
 }
 
@@ -210,6 +213,7 @@ impl FromStr for ControlWord {
             "ali" => Ok(ControlWord::ALI),
             "ahi" => Ok(ControlWord::AHI),
             "lsp" => Ok(ControlWord::LSP),
+            "lpm" => Ok(ControlWord::LPM),
             "sh" => Ok(ControlWord::SH),
             _ => Err(Error::UnknownFlag(s.to_owned())),
         }
@@ -272,6 +276,7 @@ impl Stream {
                                 "ld:" => Instruction::Ld,
                                 "st:" => Instruction::St,
                                 "lda:" => Instruction::Lda,
+                                "lpm:" => Instruction::Lpm,
                                 "push:" => Instruction::Push,
                                 "pop:" => Instruction::Pop,
                                 "jnz:" => Instruction::Jnz,

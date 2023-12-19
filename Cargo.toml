@@ -1,15 +1,11 @@
 [package]
-name = "f8ful"
+name = "fateful"
 version = "0.1.0"
 edition = "2021"
 authors = ["commonkestrel"]
 license = "MIT"
 build = "build.rs"
 rust-version = "1.70.0"
-
-[[bin]]
-name = "fateful"
-path = "src/main.rs"
 
 [workspace]
 members = ["examples/advanced", "examples/multi-port", "examples/rust-peripheral"]
@@ -23,10 +19,10 @@ clio = { version = "0.3", features = ["clap-parse"] }
 colored = "2"
 env_logger = "0.10"
 libloading = "0.8.1"
-log = "0.4"
 logos = "0.13"
 modular-bitfield = "0.11"
 once_cell = "1.18"
+phf = { version = "0.11.2", features = ["macros"] }
 regex = "1.10"
 shadow-rs = "0.24"
 thiserror = "1"
@@ -37,3 +33,7 @@ logos = "0.13"
 bitflags = "2.4"
 anyhow = "1"
 thiserror = "1"
+
+[features]
+default = ["http"]
+http = ["clio/http", "clio/http-ureq"]

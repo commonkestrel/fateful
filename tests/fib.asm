@@ -1,17 +1,25 @@
+; calculates the 8th fibonacci number and leaves the result in d
+
 @org 0x0000
 @define COUNT 7
 
+@include <macros>
+
+_start:
+    mv A, COUNT
+    call [fib]
+    halt
+
 fib:
-    mv r0, 0
-    mv r1, 1
-    mv r2, COUNT
+    mv C, A
+    mv A, 0
+    mv B, 1
 .loop:
-    mv r3, r0
-    add r3, r1
-    mv r0, r1
-    mv r1, r3
-    dec r2
+    mv D, A
+    add D, B
+    mv A, B
+    mv B, D
+    dec C
     lda [.loop]
-    jnz r2
-.halt:
-    jmp [.halt]
+    jnz C
+    ret

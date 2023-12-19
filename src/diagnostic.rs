@@ -1,15 +1,16 @@
-use super::{Verbosity, VERBOSITY};
+use super::assembler::lex::Span;
+use super::assembler::Errors;
+use super::assembler::VERBOSITY;
 
-use super::lex::Span;
+use std::{error::Error, fmt, sync::Arc};
 
 use colored::{Color, ColoredString, Colorize};
 use once_cell::sync::Lazy;
-use std::error::Error;
-use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
 enum Location {
-    Span(Span),
+    Span(Arc<Span>),
+    Reference(Arc<Span>, Reference),
     Panic {
         path: String,
         line: u32,
@@ -33,7 +34,7 @@ pub struct Diagnostic {
 }
 
 macro_rules! diagnostic_levels {
-    ($base:ident, $spanned:ident, $panicking:ident, $level:expr) => {
+    ($base:ident, $spanned:ident, $referencing:ident, $panicking:ident, $level:expr) => {
         #[doc = concat!("Creates a new diagnostic with the [`", stringify!($level), "`] level, and the given `message`.")]
         pub fn $base<T>(message: T) -> Self
         where
@@ -48,7 +49,7 @@ macro_rules! diagnostic_levels {
         }
 
         #[doc = concat!("Creates a new diagnostic with the [`", stringify!($level), "`] level, and the given `span` and `message`.")]
-        pub fn $spanned<T>(span: Span, message: T) -> Self
+        pub fn $spanned<T>(span: Arc<Span>, message: T) -> Self
         where
             T: Into<String>
         {
@@ -56,6 +57,19 @@ macro_rules! diagnostic_levels {
                 level: $level,
                 message: message.into(),
                 location: Some(Location::Span(span)),
+                children: Vec::new(),
+            }
+        }
+
+        #[doc = concat!("Creates a new diagnostic with the [`", stringify!($level), "`] level, and the given `span`, `message`, and `reference`.")]
+        pub fn $referencing<T>(span: Arc<Span>, message: T, reference: Reference) -> Self
+        where
+            T: Into<String>
+        {
+            Diagnostic {
+                level: $level,
+                message: message.into(),
+                location: Some(Location::Reference(span, reference)),
                 children: Vec::new(),
             }
         }
@@ -92,7 +106,7 @@ impl Diagnostic {
         }
     }
 
-    pub fn spanned<T>(span: Span, level: Level, message: T) -> Self
+    pub fn spanned<T>(span: Arc<Span>, level: Level, message: T) -> Self
     where
         T: Into<String>,
     {
@@ -124,10 +138,34 @@ impl Diagnostic {
         }
     }
 
-    diagnostic_levels!(error, spanned_error, panicking_error, Level::Error);
-    diagnostic_levels!(warning, spanned_warning, panicking_warning, Level::Warning);
-    diagnostic_levels!(note, spanned_note, panicking_note, Level::Note);
-    diagnostic_levels!(help, spanned_help, panicking_help, Level::Help);
+    diagnostic_levels!(
+        error,
+        spanned_error,
+        referencing_error,
+        panicking_error,
+        Level::Error
+    );
+    diagnostic_levels!(
+        warning,
+        spanned_warning,
+        referencing_warning,
+        panicking_warning,
+        Level::Warning
+    );
+    diagnostic_levels!(
+        note,
+        spanned_note,
+        panicking_note,
+        referencing_note,
+        Level::Note
+    );
+    diagnostic_levels!(
+        help,
+        spanned_help,
+        panicking_help,
+        referencing_help,
+        Level::Help
+    );
 
     pub fn level(&self) -> Level {
         self.level
@@ -145,6 +183,13 @@ impl Diagnostic {
         self.message = message.into();
     }
 
+    pub fn as_bug(mut self) -> Self {
+        self.set_message(
+            "This is a bug. Please report this at https://github.com/commonkestrel/f8ful/issues",
+        );
+        self
+    }
+
     pub fn span(&self) -> Option<&Span> {
         match self.location {
             Some(Location::Span(ref s)) => Some(s),
@@ -152,12 +197,15 @@ impl Diagnostic {
         }
     }
 
-    pub fn with_help<T: Into<String>>(mut self, message: T) -> Self {
+    pub fn with_help<T>(mut self, message: T) -> Self
+    where
+        T: Into<String>,
+    {
         self.children.push(Child::new(Level::Help, message));
         self
     }
 
-    pub fn set_span(&mut self, span: Span) {
+    pub fn set_span(&mut self, span: Arc<Span>) {
         self.location = Some(Location::Span(span));
     }
 
@@ -167,9 +215,7 @@ impl Diagnostic {
                 Level::Error => format!("{}: {}", "error".red(), self.message).bold(),
                 Level::Warning => format!("{}: {}", "warning".yellow(), self.message).bold(),
                 Level::Note => format!("note: {}", self.message).bold(),
-                Level::Help => {
-                    format!("{}: {}", "help".truecolor(150, 150, 255), self.message).bold()
-                }
+                Level::Help => format!("{}: {}", "help".cyan(), self.message).bold(),
             }
         } else {
             match self.level {
@@ -192,7 +238,7 @@ impl Diagnostic {
                 }
                 Level::Help => format!(
                     "{}{} {}",
-                    "help".truecolor(150, 150, 255).bold(),
+                    "help".cyan().bold(),
                     ":".bold(),
                     italic_code(&self.message)
                 )
@@ -218,6 +264,49 @@ impl Diagnostic {
         }
     }
 
+    fn format_spanned(&self, f: &mut fmt::Formatter<'_>, span: &Span) -> fmt::Result {
+        let line = span.line().unwrap_or_scream();
+
+        // Length of the number when converted to decimal, plus one for padding.
+        let spaces = (span.line_number().ilog10() + 2) as usize;
+
+        let description = format!(
+            "{cap:>width$}\n\
+                {n} {line}\n\
+                {cap:>width$}{pointer}\
+            ",
+            n = format!("{n:<spaces$}|", n = span.line_number())
+                .cyan()
+                .bold(),
+            cap = Lazy::force(&BLUE_PIPE),
+            width = spaces + 1,
+            pointer = format!(
+                "{blank:>start$}{blank:^>end$}",
+                blank = "",
+                start = span.start() + 1,
+                end = span.end() - span.start(),
+            )
+            .color(self.level.color())
+        );
+
+        let children = self.children.iter().fold("\n".to_string(), |fold, child| {
+            fold + &format!("{:>width$} {}\n", "=", child, width = spaces + 1)
+        });
+
+        write!(
+            f,
+            "{}\n{arrow:>width$} {}:{}:{}\n{}{}",
+            self.format_message(true),
+            span.source(),
+            span.line_number(),
+            span.start(),
+            description,
+            children,
+            arrow = Lazy::force(&BLUE_ARROW),
+            width = spaces + 2,
+        )
+    }
+
     #[cold]
     #[track_caller]
     pub fn scream(self) -> ! {
@@ -229,65 +318,151 @@ impl Diagnostic {
     }
 }
 
+impl Into<Errors> for Diagnostic {
+    fn into(self) -> Errors {
+        vec![self]
+    }
+}
+
 impl fmt::Display for Diagnostic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(Location::Span(ref span)) = self.location {
-            let line = span.line().unwrap_or_scream();
+        match self.location {
+            Some(Location::Span(ref span)) => self.format_spanned(f, span),
+            Some(Location::Reference(ref span, ref reference)) => {
+                let origin = span.line().unwrap_or_scream();
+                let ref_origin = reference.span.line().unwrap_or_scream();
 
-            // Length of the number when converted to decimal, plus one for padding.
-            let spaces = (span.line_number().checked_ilog10().unwrap_or(0) + 2) as usize;
+                if span.source == reference.span.source {
+                    // Length of the number when converted to decimal, plus one for padding.
+                    let spaces = (span.line_number().ilog10() + 2)
+                        .max(reference.span.line_number().ilog10() + 2)
+                        as usize;
 
-            let description = format!(
-                "{cap:>width$}\n\
-                 {n} {line}\n\
-                 {cap:>width$}{pointer}
-                ",
-                n = format!("{n:<spaces$}|", n = span.line_number())
+                    let seperator = if span.line.abs_diff(reference.span.line) > 1 {
+                        format!(
+                            "...{blank:>start$}{blank:->end$} {}",
+                            reference.message,
+                            blank = "",
+                            start = reference.span.start() + spaces - 1,
+                            end = reference.span.end() - reference.span.start()
+                        )
+                    } else {
+                        format!(
+                            "{cap:>spaces$}{blank:>start$}{blank:->end$} {}",
+                            reference.message,
+                            cap = Lazy::force(&BLUE_PIPE),
+                            blank = "",
+                            start = reference.span.start() + 1,
+                            end = reference.span.end() - reference.span.start()
+                        )
+                    }
                     .cyan()
-                    .bold(),
-                cap = Lazy::force(&BLUE_PIPE),
-                width = spaces + 1,
-                pointer = format!(
-                    "{blank:>start$}{blank:^>end$}",
-                    blank = "",
-                    start = span.start() + 1,
-                    end = span.end() - span.start(),
-                )
-                .color(self.level.color())
-            );
+                    .bold();
 
-            let children = self.children.iter().fold(String::new(), |fold, child| {
-                fold + &format!("{:>width$} {}", "=", child, width = spaces + 1)
-            });
+                    let description = format!(
+                        "{cap:>width$}\n\
+                        {refn} {ref_origin}\n\
+                        {seperator}\n\
+                        {n} {origin}\n\
+                        {cap:>width$}{pointer}\
+                        ",
+                        width = spaces + 1,
+                        n = format!("{n:<spaces$}|", n = span.line_number())
+                            .cyan()
+                            .bold(),
+                        refn = format!("{n:<spaces$}|", n = reference.span.line_number())
+                            .cyan()
+                            .bold(),
+                        cap = Lazy::force(&BLUE_PIPE),
+                        pointer = format!(
+                            "{blank:>start$}{blank:^>end$}",
+                            blank = "",
+                            start = span.start() + 1,
+                            end = span.end() - span.start(),
+                        )
+                        .color(self.level.color())
+                    );
 
-            write!(
-                f,
-                "{}\n{arrow:>width$} {}:{}:{}\n{}\n{}",
-                self.format_message(true),
-                span.source(),
-                span.line_number(),
-                span.start(),
-                description,
-                children,
-                arrow = Lazy::force(&BLUE_ARROW),
-                width = spaces + 2,
-            )
-        } else if let Some(Location::Panic {
-            ref path,
-            line,
-            column,
-        }) = self.location
-        {
-            write!(
-                f,
-                "{}, {}:{}:{}",
-                self.format_message(false),
-                path,
+                    let children = self.children.iter().fold("\n".to_string(), |fold, child| {
+                        fold + &format!("{:>spaces$} {}\n", "=", child)
+                    });
+
+                    write!(
+                        f,
+                        "{}\n{arrow:>width$} {}:{}:{}\n{}{}",
+                        self.format_message(true),
+                        span.source(),
+                        span.line_number(),
+                        span.start(),
+                        description,
+                        children,
+                        arrow = Lazy::force(&BLUE_ARROW),
+                        width = spaces + 2,
+                    )
+                } else {
+                    self.format_spanned(f, span)?;
+
+                    let line = reference.span.line().unwrap_or_scream();
+
+                    // Length of the number when converted to decimal, plus one for padding.
+                    let spaces = (reference.span.line_number().ilog10() + 2) as usize;
+
+                    let description = format!(
+                        "{cap:>width$}\n\
+                            {n} {line}\n\
+                            {cap:>width$}{pointer}\
+                        ",
+                        n = format!("{n:<spaces$}|", n = reference.span.line_number())
+                            .cyan()
+                            .bold(),
+                        cap = Lazy::force(&BLUE_PIPE),
+                        width = spaces + 1,
+                        pointer = format!(
+                            "{blank:>start$}{blank:^>end$}",
+                            blank = "",
+                            start = reference.span.start() + 1,
+                            end = reference.span.end() - reference.span.start(),
+                        )
+                        .cyan()
+                    );
+
+                    write!(
+                        f,
+                        "{} {}\n{arrow:>width$} {}:{}:{}\n{}",
+                        "info:".cyan().bold(),
+                        reference.message,
+                        reference.span.source(),
+                        reference.span.line_number(),
+                        reference.span.start(),
+                        description,
+                        arrow = Lazy::force(&BLUE_ARROW),
+                        width = spaces + 2,
+                    )
+                }
+            }
+            Some(Location::Panic {
+                ref path,
                 line,
-                column
-            )
-        } else {
-            write!(f, "{}", self.format_message(false))
+                column,
+            }) => {
+                write!(
+                    f,
+                    "{}, {}:{}:{}",
+                    self.format_message(false),
+                    path,
+                    line,
+                    column
+                )
+            }
+            None => {
+                let fmt = self.format_message(false);
+                let children = self
+                    .children
+                    .iter()
+                    .fold(String::new(), |fold, child| fold + &format!("\n= {child}"));
+
+                write!(f, "{fmt}{children}")
+            }
         }
     }
 }
@@ -306,14 +481,14 @@ pub enum Level {
     Note = 4,
 }
 
-impl PartialEq<super::Verbosity> for Level {
-    fn eq(&self, other: &super::Verbosity) -> bool {
+impl PartialEq<super::assembler::Verbosity> for Level {
+    fn eq(&self, other: &super::assembler::Verbosity) -> bool {
         (*self as u8) == (*other as u8)
     }
 }
 
-impl PartialOrd<super::Verbosity> for Level {
-    fn partial_cmp(&self, other: &super::Verbosity) -> Option<std::cmp::Ordering> {
+impl PartialOrd<super::assembler::Verbosity> for Level {
+    fn partial_cmp(&self, other: &super::assembler::Verbosity) -> Option<std::cmp::Ordering> {
         (*self as u8).partial_cmp(&(*other as u8))
     }
 }
@@ -339,40 +514,42 @@ impl Default for Diagnostic {
 
 #[macro_export]
 macro_rules! error {
-    ($($arg:tt)*) => ($crate::assembler::diagnostic::Diagnostic::error(::std::format!($($arg)*)))
+    ($($arg:tt)*) => ($crate::diagnostic::Diagnostic::error(::std::format!($($arg)*)))
 }
 
 #[macro_export]
 macro_rules! spanned_error {
-    ($span:expr, $($arg:tt)*) => ($crate::assembler::diagnostic::Diagnostic::spanned_error($span, ::std::format!($($arg)*)))
+    ($span:expr, $($arg:tt)*) => ($crate::diagnostic::Diagnostic::spanned_error($span, ::std::format!($($arg)*)))
 }
 
 #[macro_export]
 macro_rules! warn {
-    ($($arg:tt)*) => ($crate::assembler::diagnostic::Diagnostic::warn(::std::format!($($arg)*)))
+    ($($arg:tt)*) => ($crate::diagnostic::Diagnostic::warning(::std::format!($($arg)*)))
 }
 
 #[macro_export]
 macro_rules! spanned_warn {
-    ($span:expr, $($arg:tt)*) => ($crate::assembler::diagnostic::Diagnostic::spanned_warn($span, ::std::format!($($arg)*)))
-}
-#[macro_export]
-macro_rules! info {
-    ($($arg:tt)*) => ($crate::assembler::diagnostic::Diagnostic::info(::std::format!($($arg)*)))
+    ($span:expr, $($arg:tt)*) => ($crate::diagnostic::Diagnostic::spanned_warning($span, ::std::format!($($arg)*)))
 }
 
 #[macro_export]
-macro_rules! spanned_info {
-    ($span:expr, $($arg:tt)*) => ($crate::assembler::diagnostic::Diagnostic::spanned_info($span, ::std::format!($($arg)*)))
-}
-#[macro_export]
-macro_rules! debug {
-    ($($arg:tt)*) => ($crate::assembler::diagnostic::Diagnostic::debug(::std::format!($($arg)*)))
+macro_rules! note {
+    ($($arg:tt)*) => ($crate::diagnostic::Diagnostic::note(::std::format!($($arg)*)))
 }
 
 #[macro_export]
-macro_rules! spanned_debug {
-    ($span:expr, $($arg:tt)*) => ($crate::assembler::diagnostic::Diagnostic::spanned_debug($span, ::std::format!($($arg)*)))
+macro_rules! spanned_note {
+    ($span:expr, $($arg:tt)*) => ($crate::diagnostic::Diagnostic::spanned_note($span, ::std::format!($($arg)*)))
+}
+
+#[macro_export]
+macro_rules! help {
+    ($($arg:tt)*) => ($crate::diagnostic::Diagnostic::help(::std::format!($($arg)*)))
+}
+
+#[macro_export]
+macro_rules! spanned_help {
+    ($span:expr, $($arg:tt)*) => ($crate::diagnostic::Diagnostic::spanned_help($span, ::std::format!($($arg)*)))
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -421,22 +598,28 @@ fn italic_code(message: &str) -> String {
 impl fmt::Display for Child {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.level {
-            Level::Error => write!(
-                f,
-                "{}",
-                format!("{}: {}", "error".red(), self.message).bold()
-            ),
-            Level::Warning => write!(
-                f,
-                "{}",
-                format!("{}: {}", "warning".yellow(), self.message).bold()
-            ),
-            Level::Note => write!(f, "{}", format!("note: {}", self.message).bold()),
-            Level::Help => write!(
-                f,
-                "{}",
-                format!("{}: {}", "help".truecolor(150, 150, 255), self.message).bold()
-            ),
+            Level::Error => write!(f, "{}: {}", "error".red().bold(), self.message,),
+            Level::Warning => write!(f, "{}: {}", "warning".yellow().bold(), self.message,),
+            Level::Note => write!(f, "{}: {}", "note".bold(), self.message),
+            Level::Help => write!(f, "{}: {}", "help".cyan().bold(), self.message,),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Reference {
+    span: Arc<Span>,
+    message: String,
+}
+
+impl Reference {
+    pub fn new<T>(span: Arc<Span>, message: T) -> Reference
+    where
+        T: Into<String>,
+    {
+        Reference {
+            span,
+            message: message.into(),
         }
     }
 }
@@ -444,12 +627,16 @@ impl fmt::Display for Child {
 pub trait ResultScream<T, E> {
     /// Returns the contained [`Ok`] value, consuming the `self` value.
     ///
+    /// ### Panics
     ///
+    /// Panics if the value is an [`Err`], with a short diagnostic message
+    /// with the content of the [`Err`] being
+    /// [`scream`][Diagnostic::scream]ed at an [`Error`][Level::Error] level.
     fn unwrap_or_scream(self) -> T
     where
         E: fmt::Debug;
 
-    fn spanned_unwrap(self, span: Span) -> T
+    fn spanned_unwrap(self, span: Arc<Span>) -> T
     where
         E: fmt::Debug;
 
@@ -464,7 +651,7 @@ pub trait ResultScream<T, E> {
     where
         E: fmt::Debug;
 
-    fn spanned_expect<M: Into<String>>(self, span: Span, message: M) -> T
+    fn spanned_expect<M: Into<String>>(self, span: Arc<Span>, message: M) -> T
     where
         E: fmt::Debug;
 
@@ -502,7 +689,7 @@ impl<T, E> ResultScream<T, E> for Result<T, E> {
 
     #[track_caller]
     #[inline(always)]
-    fn spanned_unwrap(self, span: Span) -> T
+    fn spanned_unwrap(self, span: Arc<Span>) -> T
     where
         E: fmt::Debug,
     {
@@ -530,7 +717,7 @@ impl<T, E> ResultScream<T, E> for Result<T, E> {
 
     #[track_caller]
     #[inline(always)]
-    fn spanned_expect<M: Into<String>>(self, span: Span, message: M) -> T
+    fn spanned_expect<M: Into<String>>(self, span: Arc<Span>, message: M) -> T
     where
         E: fmt::Debug,
     {
@@ -571,11 +758,11 @@ impl<T, E> ResultScream<T, E> for Result<T, E> {
 pub trait OptionalScream<T> {
     fn unwrap_or_scream(self) -> T;
 
-    fn spanned_unwrap(self, span: Span) -> T;
+    fn spanned_unwrap(self, span: Arc<Span>) -> T;
 
     fn expect_or_scream<M: Into<String>>(self, message: M) -> T;
 
-    fn spanned_expect<M: Into<String>>(self, span: Span, message: M) -> T;
+    fn spanned_expect<M: Into<String>>(self, span: Arc<Span>, message: M) -> T;
 
     fn unwrap_none_or_scream(self)
     where
@@ -598,7 +785,7 @@ impl<T> OptionalScream<T> for Option<T> {
 
     #[track_caller]
     #[inline(always)]
-    fn spanned_unwrap(self, span: Span) -> T {
+    fn spanned_unwrap(self, span: Arc<Span>) -> T {
         match self {
             Some(some) => some,
             None => spanned_scream(span, "called `Option::spanned_unwrap` on a `None` value"),
@@ -616,7 +803,7 @@ impl<T> OptionalScream<T> for Option<T> {
 
     #[track_caller]
     #[inline(always)]
-    fn spanned_expect<M: Into<String>>(self, span: Span, message: M) -> T {
+    fn spanned_expect<M: Into<String>>(self, span: Arc<Span>, message: M) -> T {
         match self {
             Some(some) => some,
             None => spanned_scream(span, message.into().as_ref()),
@@ -667,7 +854,7 @@ fn scream(msg: &str) -> ! {
 #[cold]
 #[track_caller]
 #[inline(never)]
-fn spanned_scream(span: Span, msg: &str) -> ! {
+fn spanned_scream(span: Arc<Span>, msg: &str) -> ! {
     Diagnostic::spanned_error(span, msg).scream()
 }
 
@@ -687,6 +874,6 @@ fn scream_with(msg: &str, value: &dyn fmt::Debug) -> ! {
 #[cold]
 #[track_caller]
 #[inline(never)]
-fn scream_with_span(span: Span, msg: &str, value: &dyn fmt::Debug) -> ! {
+fn scream_with_span(span: Arc<Span>, msg: &str, value: &dyn fmt::Debug) -> ! {
     Diagnostic::spanned_error(span, format!("{msg}: {value:?}")).scream()
 }

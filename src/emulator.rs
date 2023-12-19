@@ -259,8 +259,10 @@ bitflags! {
         const AHI = 1 << 20;
         /// Load Stack Pointer
         const LSP = 1 << 21;
+        /// Load Program Memory
+        const LPM = 1 << 22;
         /// Set Halt
-        const SH = 1 << 22;
+        const SH = 1 << 23;
     }
 }
 
@@ -455,9 +457,10 @@ enum Instruction {
     Ld = 0x8,
     St = 0x9,
     Lda = 0xA,
-    Push = 0xB,
-    Pop = 0xC,
-    Jnz = 0xD,
+    Lpm = 0xB,
+    Push = 0xC,
+    Pop = 0xD,
+    Jnz = 0xE,
     Halt = 0xF,
 }
 
@@ -475,22 +478,39 @@ impl From<u8> for Instruction {
             0x8 => Instruction::Ld,
             0x9 => Instruction::St,
             0xA => Instruction::Lda,
-            0xB => Instruction::Push,
-            0xC => Instruction::Pop,
-            0xD => Instruction::Jnz,
+            0xB => Instruction::Lpm,
+            0xC => Instruction::Push,
+            0xD => Instruction::Pop,
+            0xE => Instruction::Jnz,
+            0xF => Instruction::Halt,
             _ => unreachable!(),
         }
     }
 }
 
-#[bitfield]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct InstructionHeader {
-    #[bits = 3]
-    register: B3,
-    immediate: bool,
-    #[bits = 4]
-    instruction: Instruction,
+use __head::InstructionHeader;
+
+/// Seperated into a seperate module to get rid of
+/// the dead code warning that was driving me crazy.
+#[allow(dead_code)]
+mod __head {
+    use super::*;
+
+    #[bitfield]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct InstructionHeader {
+        #[bits = 3]
+        pub register: B3,
+        pub immediate: bool,
+        #[bits = 4]
+        pub instruction: Instruction,
+    }
+
+    impl InstructionHeader {
+        pub fn bits(&self) -> u8 {
+            self.bytes[0]
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -611,6 +631,8 @@ impl State {
             }
         } else if cw.contains(ControlWord::PO) {
             program_byte
+        } else if cw.contains(ControlWord::LPM) {
+            self.program[self.addr as usize]
         } else {
             0x00
         };
@@ -621,9 +643,6 @@ impl State {
             self.addr = self.sp;
         }
 
-        if cw.contains(ControlWord::RBI) {
-            self.bank.set_reg(reg_index, bus);
-        }
         if cw.contains(ControlWord::SA) {
             match self.addr {
                 0x0000..=0xFFBF => {
@@ -663,8 +682,21 @@ impl State {
             self.addr = self.addr & !0xFF00 | ((bus as u16) << 8);
         }
 
-        if cw.contains(ControlWord::THL) {
+        if cw.contains(ControlWord::SR) {
+            self.bank.set_reg(
+                self.ctrl.head.register(),
+                self.bank.get_reg(program_byte & 0b0000_0111),
+            )
+        }
+
+        if cw.contains(ControlWord::THL | ControlWord::RBO) {
             self.addr = ((self.bank.h as u16) << 8) | (self.bank.l as u16);
+        } else if cw.contains(ControlWord::THL | ControlWord::RBI) {
+            let addr = self.addr.to_be_bytes();
+            self.bank.h = addr[0];
+            self.bank.l = addr[1];
+        } else if cw.contains(ControlWord::RBI) {
+            self.bank.set_reg(reg_index, bus);
         }
 
         if cw.contains(ControlWord::SPI) {
@@ -673,10 +705,6 @@ impl State {
 
         if cw.contains(ControlWord::SPD) {
             self.sp = self.sp.wrapping_sub(1);
-        }
-
-        if cw.contains(ControlWord::JNZ) && self.sreg.contains(SReg::Z) {
-            self.pc = ((self.bank.h as u16) << 8) | (self.bank.l as u16);
         }
 
         if !cw.contains(ControlWord::AO) {
@@ -690,6 +718,14 @@ impl State {
         }
 
         // falling edge
+        if cw.contains(ControlWord::JNZ) {
+            if !self.sreg.contains(SReg::Z) {
+                self.pc = ((self.bank.h as u16) << 8) | (self.bank.l as u16);
+            } else if !cw.contains(ControlWord::PCI) {
+                self.pc = self.pc.wrapping_add(1);
+            }
+        }
+
         if cw.contains(ControlWord::CR) {
             self.ctrl.clock = 0;
         } else {
@@ -855,6 +891,10 @@ impl fmt::Display for State {
                 PROGRAM COUNTER: {:#06X}\n\
                 STACK POINTER: {:#06X}\n\
                 BUS: {:#04X}\n\
+                SREG: {:#04X}\n\
+                PROGRAM BYTE: {:#04X}\n\
+                ALU PRIMARY: {:#04X}\n\
+                ALU SECONDARY: {:#04X}\n\
                 {}\
                 CONTROL WORD: {:?}\n\
                 INSTRUCTION: {:#010b}\n\
@@ -863,9 +903,13 @@ impl fmt::Display for State {
             self.pc,
             self.sp,
             self.bus,
+            self.sreg.bits(),
+            self.program[self.pc as usize],
+            self.alu.primary,
+            self.alu.secondary,
             self.bank,
             self.cw(),
-            self.ctrl.head.bytes[0]
+            self.ctrl.head.bits()
         )
     }
 }
@@ -1144,7 +1188,7 @@ async fn single_arg(
     if count != 1 {
         writeln!(
             ewriter,
-            "ARGUMENT ERROR: expected `1` argument, fount `{count}`"
+            "ARGUMENT ERROR: expected 1 argument, found {count}"
         )
         .map_err(|err| EmulatorError::Out(err))?;
         return Ok(());

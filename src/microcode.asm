@@ -2,7 +2,7 @@ add:
     li
     rsb | rbo | aom | aol | pci
 .reg:
-    rsp | aoh
+    rsp | rbo | aoh
 .imm:
     po | aoh
 .both:
@@ -12,7 +12,7 @@ sub:
     li
     rsb | rbo | aom | aol | pci
 .reg:
-    rsp | aoh
+    rsp | rbo | aoh
 .imm:
     po | aoh
 .both:
@@ -22,7 +22,7 @@ adc:
     li
     rsb | rbo | aom | aol | pci
 .reg:
-    rsp | aoh
+    rsp | rbo | aoh
 .imm:
     po | aoh
 .both:
@@ -32,7 +32,7 @@ sbc:
     li
     rsb | rbo | aom | aol | pci
 .reg:
-    rsp | aoh
+    rsp | rbo | aoh
 .imm:
     po | aoh
 .both:
@@ -42,7 +42,7 @@ nand:
     li
     rsb | rbo | aom | aol | pci
 .reg:
-    rsp | aoh
+    rsp | rbo | aoh
 .imm:
     po | aoh
 .both:
@@ -52,50 +52,47 @@ or:
     li
     rsb | rbo | aom | aol | pci
 .reg:
-    rsp | aoh
+    rsp | rbo | aoh
 .imm:
     po | aoh
 .both:
-    ao | aoh | aol | rsb | rbi | cr | pci
+    ao | aoh | rsb | rbi | cr | pci
 
 cmp:
     li
     rsb | rbo | aom | aol | pci
 .reg:
-    rsp | aoh
+    rsp | rbo | aoh
 .imm:
     po | aoh
 .both:
-    ao | aoh | aom | cr | pci
+    ao | aol | cr | pci
 
 mv:
-.reg:
-    li
-    sr | cr | pci
-.imm:
     li
     pci
+.reg:
+    sr | cr | pci
+.imm:
     rsb | rbi | po | cr | pci
 
 ld:
-.reg:
     li
+.reg:
     thl | rbo
     la | rsb | rbi | cr | pci
 .imm:
-    li
     pci
     ahi | po | pci
     ali | po
     la | rsb | rbi | cr | pci
 
 st:
-.reg:
     li
+.reg:
     thl | rbo
     sa | rsb | rbo | cr | pci
 .imm:
-    li
     pci
     ahi | po | pci
     ali | po
@@ -108,6 +105,18 @@ lda:
     po | ahi | pci
     po | ali
     thl | rbi | cr | pci
+
+lpm:
+.reg:
+    thl | rbo
+    sa | rsb | rbo | cr | pci
+.imm:
+    li
+    pci
+    po | ahi | pci
+    po | ali
+    lpm | rsb | rbi | cr | pci
+
 
 push:
     li
@@ -125,20 +134,17 @@ pop:
     li
     spi
     lsp
-    rsb | rbo | sa | cr | pci
+    rsb | rbi | la | cr | pci
 
 jnz:
+    li
 .reg:
-    li
     rsb | rbo | aom | aol
-    aol | aom | aoh
-    jnz | cr
+    aom | jnz | cr
 .imm:
-    li
     pci
     po | aom | aol
-    aol | aom | aoh
-    jnz | cr
+    aom | jnz | cr
 
 halt:
     li

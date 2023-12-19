@@ -5,6 +5,8 @@ use deploy::{DeployArgs, DeployError};
 mod assembler;
 use assembler::AssemblerArgs;
 
+mod diagnostic;
+
 #[cfg(test)]
 mod tests;
 
@@ -28,8 +30,11 @@ struct Args {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Run the F8ful emulator
     Emulate(EmulatorArgs),
+    /// Deploy a program to a connected CPU
     Deploy(DeployArgs),
+    /// Assemble an assembly program
     Assemble(AssemblerArgs),
 }
 
@@ -47,10 +52,6 @@ enum Error {
 async fn main() -> Result<(), Error> {
     let cli = Args::parse();
 
-    env_logger::Builder::new()
-        .filter_level(cli.verbose.log_level_filter())
-        .init();
-
     match cli.command {
         Command::Emulate(args) => emulator::emulate(args).await?,
         Command::Deploy(args) => deploy::deploy(args).await?,
@@ -60,6 +61,8 @@ async fn main() -> Result<(), Error> {
                 for err in errors {
                     err.emit();
                 }
+
+                error!("assembly failed due to previous errors").emit();
 
                 return Err(Error::Assembler);
             }

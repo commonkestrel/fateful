@@ -22,7 +22,7 @@ It is layed out like so:
 |-----------|-------|-------|-------|-------|-------|-------|-------|-------|
 | Low Byte  | `RSP` | `RSB` | `RBO` | `RBI` |  `AO` | `AOH` | `AOM` | `AOL` |
 | Mid Byte  |  `SR` |  `PO` |  `LI` | `JNZ` | `PCI` |  `CR` | `SPD` | `SPI` |
-| High Byte |  ` `  |  `SH`  | `LSP` | `AHI` | `ALI` |  `SA` |  `LA` | `THL` |
+| High Byte |  `SH` | `LPM` | `LSP` | `AHI` | `ALI` |  `SA` |  `LA` | `THL` |
 
 ### ALU Opcode
 
@@ -70,16 +70,17 @@ These operations are listed here:
 - `SPD` (Stack Pointer Decrement): Increments the Stack Pointer.
 - `CR` (Clock Reset): Resets the clock in the control segment. This will always load the next instruction.
 - `PCI` (Program Counter Increment): Increments the Program Counter.
-- `JNZ` (Jump if Not Zero): Sets the program counter to the address in the H and L registers if the `Z` flag in the Status Register is set.
+- `JNZ` (Jump if Not Zero): Sets the program counter to the address in the H and L registers if the `Z` flag in the Status Register is set, otherwise increments the program counter.
 - `LI` (Load Instruction): Loads the the current program byte into the instruction register.
 - `PO` (Program Out): Outputs the current program byte onto the bus.
 - `SR` (Store Register): Stores the register indexed in the instruction register into the register indexed in the current program byte.
-- `THL` (Transfer HL): Transfers the bytes in the H and L registers into the Address Register.
+- `THL` (Transfer HL): Links the bytes in the HL registers and the Address Register.
 - `LA` (Load Address): Outputs the byte of RAM addressed in the Address Register to the bus.
 - `SA` (Store Address): Stores the contents of the bus at the RAM location addressed in the Address Register.
 - `ALI` (Address Low In): Loads the contents of the bus into the low byte of the Address Register.
 - `AHI` (Address High In): Loads the contents of the bus into the high byte of the Address Register.
 - `LSP` (Load Stack Pointer): Loads the Stack Pointer into the Address Register.
+- `LPM` (Load Program Memory): Loads the
 - `SH` (Set Halt): Sets the Halt (`H`) bit in the Status Register
 
 ## Memory

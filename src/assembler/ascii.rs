@@ -8,10 +8,14 @@ pub struct AsciiStr {
 }
 
 impl AsciiStr {
-    pub unsafe fn from_bytes_unchecked(buf: &[u8]) -> Self {
+    pub unsafe fn from_bytes_unchecked<T: Iterator<Item = u8>>(buf: T) -> Self {
         AsciiStr {
-            inner: Vec::from(buf),
+            inner: buf.collect(),
         }
+    }
+
+    pub fn into_bytes(self) -> Vec<u8> {
+        self.inner
     }
 }
 
@@ -104,7 +108,7 @@ pub fn unescape_str<'a>(s: &'a str) -> Result<AsciiStr, UnescapeError> {
         let octal = Regex::new(r"\\[0-7]{3}").unwrap();
 
         octal.replace_all(&owned, |cap: &Captures<'_>| {
-            // The RegEx expression guarantees a valid octal.
+            // The Regex expression guarantees a valid octal.
             let byte = u8::from_str_radix(&cap[0].strip_prefix('\\').unwrap(), 8).unwrap();
 
             if byte > 0x7F {
@@ -143,7 +147,11 @@ pub fn unescape_str<'a>(s: &'a str) -> Result<AsciiStr, UnescapeError> {
         ));
     }
 
-    unsafe { Ok(AsciiStr::from_bytes_unchecked(simple.as_bytes())) }
+    unsafe {
+        Ok(AsciiStr::from_bytes_unchecked(
+            simple.bytes().chain(std::iter::once(0)),
+        ))
+    }
 }
 
 mod tests {
@@ -152,9 +160,9 @@ mod tests {
 
     #[test]
     fn unescape() {
-        let test_str = "\\050 hello \\x29 \\t\\n\\0";
+        let test_str = "\\050 hello \\x29 \\t\\n";
         let unescaped = unescape_str(test_str).unwrap();
-        assert!(unescaped == "\x28 hello \x29 \t\n\0");
+        assert_eq!(unescaped, "\x28 hello \x29 \t\n\0");
 
         let failure = "\\050 \\";
         unescape_str(failure).unwrap_err();

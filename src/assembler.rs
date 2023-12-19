@@ -3,11 +3,18 @@
 //! Will be completed once I actually fix the assembler.
 
 mod ascii;
-mod diagnostic;
-mod lex;
-pub use diagnostic::{Diagnostic, OptionalScream, ResultScream};
+mod assemble;
+mod eval;
+mod include;
+pub mod lex;
+mod parse;
+mod token;
+pub use crate::diagnostic::{Diagnostic, OptionalScream, ResultScream};
+use crate::error;
 
-use std::sync::OnceLock;
+use colored::Colorize;
+
+use std::{sync::OnceLock, time::Instant};
 
 use clap::Args;
 use clap_verbosity_flag::{Level, WarnLevel};
@@ -23,7 +30,7 @@ pub struct AssemblerArgs {
 
     #[clap(value_parser, default_value = "-")]
     input: Input,
-    #[clap(value_parser, default_value = "-")]
+    #[clap(short, long, value_parser, default_value = "-")]
     output: Output,
 }
 
@@ -32,7 +39,7 @@ pub type Errors = Vec<Diagnostic>;
 pub static VERBOSITY: OnceLock<Verbosity> = OnceLock::new();
 
 pub async fn assemble(
-    _args: AssemblerArgs,
+    mut args: AssemblerArgs,
     verbosity: clap_verbosity_flag::Verbosity<WarnLevel>,
 ) -> Result<(), Errors> {
     let verbose = match verbosity.log_level() {
@@ -46,7 +53,31 @@ pub async fn assemble(
     };
     VERBOSITY.set(verbose).expect("verbosity should be empty");
 
-    todo!()
+    let start = Instant::now();
+    let input = format!("{}", args.input);
+
+    let lexed = lex::lex(args.input)?;
+    let parsed = parse::parse(lexed)?;
+    let assembled = assemble::assemble(parsed)?;
+
+    args.output
+        .lock()
+        .write_all(&assembled)
+        .map_err(|err| vec![error!("failed to write to output: {err}")])?;
+    args.output
+        .finish()
+        .map_err(|err| vec![error!("failed to finalize output: {err}")])?;
+
+    let elapsed = start.elapsed().as_millis();
+    let seconds = elapsed / 1000;
+    let millis = elapsed % 1000;
+    println!(
+        "    {} assembling `{}` in {seconds}.{millis:03}s",
+        "Finished".green().bold(),
+        input.trim_matches('"')
+    );
+
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
