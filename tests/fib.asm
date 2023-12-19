@@ -14,7 +14,6 @@ fib:
     mv C, A
     mv A, 0
     mv B, 1
-    mv C, COUNT
 .loop:
     mv D, A
     add D, B
