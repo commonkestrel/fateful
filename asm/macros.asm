@@ -16,7 +16,7 @@
 
 @macro jmp {
     () {
-        jnz 0
+        jnz 1
     }
     (%addr:label) {
         lda %addr
@@ -26,14 +26,14 @@
 
 @macro call {
     () {
-        push (($ + 1) & 0xFF)
-        push (($ + 1) >> 8)
-        jmp
+        push (($ + 6) & 0xFF) ; 2 bytes
+        push (($ + 4) >> 8)   ; 2 bytes
+        jmp                   ; 2 bytes
     }
     (%location:label) {
-        push (($ + 1) & 0xFF)
-        push (($ + 1) >> 8)
-        jmp %location
+        push (($ + 9) & 0xFF) ; 2 bytes
+        push (($ + 7) >> 8)   ; 2 bytes
+        jmp %location         ; 5 bytes
     }
 }
 
