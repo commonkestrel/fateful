@@ -408,10 +408,10 @@ impl Parsable for ParseTok {
                     inner: TokenInner::Punctuation(Punctuation::Colon),
                 }) = cursor.peek()
                 {
-                    let colon: Token![:] = cursor.parse()?;
-                    let nl: NewLine = cursor.parse()?;
-
-                    Ok(ParseTok::Label(Label { name, colon, nl }))
+                    Ok(ParseTok::Label(Label {
+                        name,
+                        colon: cursor.parse()?,
+                    }))
                 } else {
                     let args = punctuated!(cursor)?;
                     // we know there's a newline at the end, so we can just skip it
@@ -434,7 +434,6 @@ pub struct Inst {
 pub struct Label {
     pub name: Ident,
     pub colon: Token![:],
-    pub nl: NewLine,
 }
 
 #[derive(Debug)]
@@ -1184,10 +1183,10 @@ impl MacroDef {
                         inner: TokenInner::Punctuation(Punctuation::Colon),
                     }) = cursor.peek()
                     {
-                        let colon: Token![:] = cursor.parse()?;
-                        let nl: NewLine = cursor.parse()?;
-
-                        expanded.push(ParseTok::Label(Label { name, colon, nl }))
+                        expanded.push(ParseTok::Label(Label {
+                            name,
+                            colon: cursor.parse()?,
+                        }))
                     } else {
                         let args = MacroDef::replace_punctuated(&mut cursor, &parameters)?;
 

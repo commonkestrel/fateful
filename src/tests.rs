@@ -1,8 +1,15 @@
-use std::time::Duration;
-use std::num::ParseIntError;
+use crate::assembler::{
+    tests::{
+        assemble,
+        lex::{self, Token, TokenInner},
+        parse,
+    },
+    Verbosity, VERBOSITY,
+};
 use crate::emulator::test_emulate;
-use crate::assembler::{VERBOSITY, Verbosity, tests::{lex::{self, Token, TokenInner}, parse, assemble}};
 use crate::{diagnostic::Diagnostic, error, spanned_error};
+use std::num::ParseIntError;
+use std::time::Duration;
 
 #[inline]
 fn emit_errors(errors: Vec<Diagnostic>) -> Diagnostic {
@@ -43,29 +50,49 @@ fn test_file(path: &str) -> Result<(), Diagnostic> {
     let mut f = None;
     let mut h = None;
     let mut l = None;
-    
+
     let input = clio::Input::new(path).unwrap();
     let lexed = lex::lex(input).map_err(emit_errors)?;
 
     let mut skipped = lexed.iter().filter(|tok| tok.inner != TokenInner::NewLine);
-    while let Some(Token { span, inner: TokenInner::Doc(docstr) }) = skipped.next() {
+    while let Some(Token {
+        span,
+        inner: TokenInner::Doc(docstr),
+    }) = skipped.next()
+    {
         let trimmed = docstr.trim();
         if let Some(val) = trimmed.strip_prefix("a:") {
-            a = Some(parse_expected(val.trim()).map_err(|err| spanned_error!(span.clone(), "unable to parse 8-bit integer: {err}"))?);
+            a = Some(parse_expected(val.trim()).map_err(|err| {
+                spanned_error!(span.clone(), "unable to parse 8-bit integer: {err}")
+            })?);
         } else if let Some(val) = trimmed.strip_prefix("b:") {
-            b = Some(parse_expected(val.trim()).map_err(|err| spanned_error!(span.clone(), "unable to parse 8-bit integer: {err}"))?);
+            b = Some(parse_expected(val.trim()).map_err(|err| {
+                spanned_error!(span.clone(), "unable to parse 8-bit integer: {err}")
+            })?);
         } else if let Some(val) = trimmed.strip_prefix("c:") {
-            c = Some(parse_expected(val.trim()).map_err(|err| spanned_error!(span.clone(), "unable to parse 8-bit integer: {err}"))?);
+            c = Some(parse_expected(val.trim()).map_err(|err| {
+                spanned_error!(span.clone(), "unable to parse 8-bit integer: {err}")
+            })?);
         } else if let Some(val) = trimmed.strip_prefix("d:") {
-            d = Some(parse_expected(val.trim()).map_err(|err| spanned_error!(span.clone(), "unable to parse 8-bit integer: {err}"))?);
+            d = Some(parse_expected(val.trim()).map_err(|err| {
+                spanned_error!(span.clone(), "unable to parse 8-bit integer: {err}")
+            })?);
         } else if let Some(val) = trimmed.strip_prefix("e:") {
-            e = Some(parse_expected(val.trim()).map_err(|err| spanned_error!(span.clone(), "unable to parse 8-bit integer: {err}"))?);
+            e = Some(parse_expected(val.trim()).map_err(|err| {
+                spanned_error!(span.clone(), "unable to parse 8-bit integer: {err}")
+            })?);
         } else if let Some(val) = trimmed.strip_prefix("f:") {
-            f = Some(parse_expected(val.trim()).map_err(|err| spanned_error!(span.clone(), "unable to parse 8-bit integer: {err}"))?);
+            f = Some(parse_expected(val.trim()).map_err(|err| {
+                spanned_error!(span.clone(), "unable to parse 8-bit integer: {err}")
+            })?);
         } else if let Some(val) = trimmed.strip_prefix("h:") {
-            h = Some(parse_expected(val.trim()).map_err(|err| spanned_error!(span.clone(), "unable to parse 8-bit integer: {err}"))?);
+            h = Some(parse_expected(val.trim()).map_err(|err| {
+                spanned_error!(span.clone(), "unable to parse 8-bit integer: {err}")
+            })?);
         } else if let Some(val) = trimmed.strip_prefix("l:") {
-            l = Some(parse_expected(val.trim()).map_err(|err| spanned_error!(span.clone(), "unable to parse 8-bit integer: {err}"))?);
+            l = Some(parse_expected(val.trim()).map_err(|err| {
+                spanned_error!(span.clone(), "unable to parse 8-bit integer: {err}")
+            })?);
         }
     }
 
@@ -73,7 +100,6 @@ fn test_file(path: &str) -> Result<(), Diagnostic> {
     let assembled = assemble::assemble(parsed).map_err(emit_errors)?;
 
     let bank = test_emulate(assembled.into(), Duration::from_secs(1)).unwrap();
-
 
     bank_assert(bank.a, a);
     bank_assert(bank.b, b);
@@ -83,7 +109,7 @@ fn test_file(path: &str) -> Result<(), Diagnostic> {
     bank_assert(bank.f, f);
     bank_assert(bank.h, h);
     bank_assert(bank.l, l);
-    
+
     Ok(())
 }
 

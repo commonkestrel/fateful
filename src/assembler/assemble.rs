@@ -215,7 +215,10 @@ impl Instruction {
     ) -> Result<Bytes, Diagnostic> {
         match regimm {
             RegImm::Register(second) => Ok(Bytes::Double([instruction | reg as u8, second as u8])),
-            RegImm::Immediate(imm) => Ok(Bytes::Double([instruction | IMMEDIATE_MASK | reg as u8, imm])),
+            RegImm::Immediate(imm) => Ok(Bytes::Double([
+                instruction | IMMEDIATE_MASK | reg as u8,
+                imm,
+            ])),
             RegImm::Expr(mut expr) => {
                 Instruction::expand_expr(&mut expr.inner, pc, parent);
 

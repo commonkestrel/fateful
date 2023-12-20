@@ -14,7 +14,11 @@ use crate::error;
 
 #[cfg(test)]
 pub mod tests {
-    pub use super::{lex::{self, Token, TokenStream}, parse, assemble};
+    pub use super::{
+        assemble,
+        lex::{self, Token, TokenStream},
+        parse,
+    };
 }
 
 use colored::Colorize;
