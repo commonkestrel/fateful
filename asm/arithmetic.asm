@@ -24,3 +24,17 @@
 @macro not (%reg:reg) {
     nand %reg, %reg
 }
+
+/// Bitwise and
+@macro and (%x:reg, %y:reg|imm) {
+    nand %x, %y
+    nand %x, %x
+}
+
+/// Bitwise xor
+@macro xor (%x:reg, %y:reg|imm) {
+    mw F, %y
+    or F, %x
+    nand %x, %y
+    and %x, F
+}
