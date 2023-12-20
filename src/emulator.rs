@@ -6,7 +6,9 @@ use std::{
     io::{Read, Write},
     str::FromStr,
     sync::{Arc, OnceLock},
-    time::{Duration, SystemTime, SystemTimeError},
+    fs::File,
+    path::Path,
+    time::{Duration, Instant, SystemTime, SystemTimeError},
 };
 
 use async_std::{
@@ -53,6 +55,8 @@ pub enum EmulatorError {
     OnceFull,
     #[error("global state not initialized yet")]
     OnceEmpty,
+    #[error("emulator timed out waiting for halt")]
+    Timeout,
 }
 
 #[derive(Debug, Args)]
@@ -356,16 +360,16 @@ bitflags! {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct RegBank {
-    a: u8,
-    b: u8,
-    c: u8,
-    d: u8,
-    e: u8,
-    f: u8,
-    h: u8,
-    l: u8,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RegBank {
+    pub a: u8,
+    pub b: u8,
+    pub c: u8,
+    pub d: u8,
+    pub e: u8,
+    pub f: u8,
+    pub h: u8,
+    pub l: u8,
 }
 
 impl RegBank {
@@ -498,7 +502,7 @@ mod __head {
 
     #[bitfield]
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-    pub struct InstructionHeader {
+    pub(super) struct InstructionHeader {
         #[bits = 3]
         pub register: B3,
         pub immediate: bool,
@@ -743,8 +747,7 @@ impl State {
         self.speed = None;
 
         print!(
-            "\n\
-            INFO: halt detected\n\
+            "INFO: halt detected\n\
             > "
         );
         std::io::stdout()
@@ -1074,6 +1077,21 @@ async fn handle_input(
     write!(writer, "> ").map_err(|err| EmulatorError::Out(err))?;
 
     Ok(())
+}
+
+#[cfg(test)]
+pub fn test_emulate(program: Box<[u8]>, timeout: Duration) -> Result<RegBank, EmulatorError> {
+    let start = Instant::now();
+    let mut state = State::init(program);
+
+    while start.elapsed() <= timeout {
+        let halted = state.tick();
+        if halted {
+            return Ok(state.bank);
+        }
+    }
+
+    Err(EmulatorError::Timeout)
 }
 
 fn help() {

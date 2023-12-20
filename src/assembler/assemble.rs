@@ -744,7 +744,7 @@ fn compile(
         let segment_range = start..pc;
 
         for (i, range) in ranges.iter().enumerate() {
-            if segment_range.start.max(range.start) <= segment_range.end.min(range.end) {
+            if segment_range.start.max(range.start) < segment_range.end.min(range.end) {
                 errors.push(
                     match stream[i].cseg {
                         Some(ref cseg) => Diagnostic::referencing_error(
@@ -862,7 +862,7 @@ pub fn assemble_data(stream: Vec<DSeg>) -> Result<HashMap<String, (u16, Arc<Span
         let segment_range = origin..(origin + size);
 
         for (i, range) in ranges.iter().enumerate() {
-            if segment_range.start.max(range.start) <= segment_range.end.min(range.end) {
+            if segment_range.start.max(range.start) < segment_range.end.min(range.end) {
                 errors.push(
                     Diagnostic::referencing_error(
                         segment.dseg.span.clone(),

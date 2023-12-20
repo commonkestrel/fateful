@@ -472,13 +472,14 @@ pub fn parse(stream: TokenStream) -> Result<ParseStream, Errors> {
 
     while let Some(tok) = ctx.cursor.peek() {
         if let TokenInner::Ident(lex::Ident::PreProc(PreProc::Cseg)) = tok.inner {
-            let mut segment = Segment::DSeg(DSeg {
-                dseg: ctx
-                    .cursor
-                    .parse()
-                    .map_err(|err| Into::<Errors>::into(err))?,
+            let mut segment = Segment::CSeg(CSeg {
+                cseg: Some(
+                    ctx.cursor
+                        .parse()
+                        .map_err(|err| Into::<Errors>::into(err))?,
+                ),
                 org: None,
-                variables: HashMap::new(),
+                tokens: Vec::new(),
             });
 
             std::mem::swap(&mut segment, &mut ctx.current_segment);
@@ -490,14 +491,13 @@ pub fn parse(stream: TokenStream) -> Result<ParseStream, Errors> {
 
             ctx.cursor.position += 1;
         } else if let TokenInner::Ident(lex::Ident::PreProc(PreProc::Dseg)) = tok.inner {
-            let mut segment = Segment::CSeg(CSeg {
-                cseg: Some(
-                    ctx.cursor
-                        .parse()
-                        .map_err(|err| Into::<Errors>::into(err))?,
-                ),
+            let mut segment = Segment::DSeg(DSeg {
+                dseg: ctx
+                    .cursor
+                    .parse()
+                    .map_err(|err| Into::<Errors>::into(err))?,
                 org: None,
-                tokens: Vec::new(),
+                variables: HashMap::new(),
             });
 
             std::mem::swap(&mut segment, &mut ctx.current_segment);

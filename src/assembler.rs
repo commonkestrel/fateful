@@ -3,14 +3,19 @@
 //! Will be completed once I actually fix the assembler.
 
 mod ascii;
-mod assemble;
+pub mod assemble;
 mod eval;
 mod include;
 pub mod lex;
-mod parse;
+pub mod parse;
 mod token;
 pub use crate::diagnostic::{Diagnostic, OptionalScream, ResultScream};
 use crate::error;
+
+#[cfg(test)]
+pub mod tests {
+    pub use super::{lex::{self, Token, TokenStream}, parse, assemble};
+}
 
 use colored::Colorize;
 
