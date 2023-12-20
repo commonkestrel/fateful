@@ -6,9 +6,7 @@ use std::{
     io::{Read, Write},
     str::FromStr,
     sync::{Arc, OnceLock},
-    fs::File,
-    path::Path,
-    time::{Duration, Instant, SystemTime, SystemTimeError},
+    time::{Duration, Instant},
 };
 
 use async_std::{
@@ -34,6 +32,8 @@ type ReadFn = unsafe extern "C" fn(u8) -> u8;
 type StatefulReadFn = unsafe extern "C" fn(*mut c_void, u8) -> u8;
 type WriteFn = unsafe extern "C" fn(u8, u8);
 type StatefulWriteFn = unsafe extern "C" fn(*mut c_void, u8, u8);
+type TickFn = unsafe extern "C" fn();
+type StatefulTickFn = unsafe extern "C" fn(*mut c_void);
 type DropFn = unsafe extern "C" fn();
 type StatefulDropFn = unsafe extern "C" fn(*mut c_void);
 type ResetFn = unsafe extern "C" fn();
@@ -49,12 +49,11 @@ pub enum EmulatorError {
     StdIn,
     #[error("unable to print to stdout")]
     Out(std::io::Error),
-    #[error("error getting time elapsed")]
-    Time(#[from] SystemTimeError),
     #[error("global state already set")]
     OnceFull,
     #[error("global state not initialized yet")]
     OnceEmpty,
+    #[cfg(test)]
     #[error("emulator timed out waiting for halt")]
     Timeout,
 }
@@ -539,6 +538,7 @@ struct State {
     sp: u16,
     ctrl: Control,
     sreg: SReg,
+    timer: u16,
     alu: Alu,
     bus: u8,
     bank: RegBank,
@@ -557,6 +557,7 @@ impl State {
             sp: 0xFFBF,
             ctrl: Control::default(),
             sreg: SReg::empty(),
+            timer: 0,
             alu: Alu::default(),
             bus: 0,
             bank: RegBank::default(),
@@ -610,7 +611,7 @@ impl State {
         } else if cw.contains(ControlWord::LA) {
             match self.addr {
                 0x0000..=0xFFBF => self.mem[self.addr as usize],
-                0xFFC0..=0xFFFE => match self.peripherals.get(&((self.addr - 0xFFC0) as u8)) {
+                0xFFC0..=0xFFFC => match self.peripherals.get(&((self.addr - 0xFFC0) as u8)) {
                     Some(periph) => unsafe {
                         if let Ok(stateful_read) =
                             periph.lib.library.get::<StatefulReadFn>(b"stateful_read")
@@ -631,6 +632,8 @@ impl State {
                     },
                     None => 0x00,
                 },
+                0xFFFD => (self.timer >> 8) as u8,
+                0xFFFE => (self.timer & 0xFF) as u8,
                 0xFFFF => self.sreg.bits(),
             }
         } else if cw.contains(ControlWord::PO) {
@@ -652,7 +655,7 @@ impl State {
                 0x0000..=0xFFBF => {
                     self.mem[self.addr as usize] = bus;
                 }
-                0xFFC0..=0xFFFE => match self.peripherals.get(&((self.addr - 0xFFC0) as u8)) {
+                0xFFC0..=0xFFFC => match self.peripherals.get(&((self.addr - 0xFFC0) as u8)) {
                     Some(periph) => unsafe {
                         if let Ok(stateful_write) =
                             periph.lib.library.get::<StatefulWriteFn>(b"stateful_write")
@@ -673,6 +676,12 @@ impl State {
                     },
                     None => {}
                 },
+                0xFFFD => {
+                    self.timer = (self.timer & 0x00FF) | ((bus as u16) << 8);
+                }
+                0xFFFE => {
+                    self.timer = (self.timer & 0xFF00) | (bus as u16);
+                }
                 0xFFFF => {
                     self.sreg = SReg::from_bits_retain(bus);
                 }
@@ -722,6 +731,27 @@ impl State {
         }
 
         // falling edge
+        for (_, peripheral) in self.peripherals.iter() {
+            unsafe {
+                if let Ok(stateful_tick) = peripheral
+                    .lib
+                    .library
+                    .get::<StatefulTickFn>(b"stateful_tick")
+                {
+                    match peripheral.lib.state {
+                        Some(state) => stateful_tick(state),
+                        None => {
+                            eprintln!("PERIPHERAL ERROR: unable to call `stateful_tick` (state was not initialized)");
+                        }
+                    }
+                } else if let Ok(stateless_tick) = peripheral.lib.library.get::<TickFn>(b"tick") {
+                    stateless_tick();
+                }
+            }
+        }
+
+        self.timer = self.timer.wrapping_add(1);
+
         if cw.contains(ControlWord::JNZ) {
             if !self.sreg.contains(SReg::Z) {
                 self.pc = ((self.bank.h as u16) << 8) | (self.bank.l as u16);
@@ -999,7 +1029,7 @@ pub async fn emulate(mut args: EmulatorArgs) -> Result<(), EmulatorError> {
         .map_err(|err| EmulatorError::Out(err))?;
     let stdin = spawn_stdin_channel();
 
-    let mut prev = SystemTime::now();
+    let mut prev = Instant::now();
 
     loop {
         match stdin.try_recv() {
@@ -1026,12 +1056,12 @@ pub async fn emulate(mut args: EmulatorArgs) -> Result<(), EmulatorError> {
         let mut state = STATE.get().ok_or(EmulatorError::OnceEmpty)?.write().await;
 
         let tick = match state.speed {
-            Some(speed) => prev.elapsed()? >= speed.0,
+            Some(speed) => prev.elapsed() >= speed.0,
             None => false,
         };
 
         if tick {
-            prev = SystemTime::now();
+            prev = Instant::now();
 
             let halted = state.tick();
             if halted {
@@ -1270,7 +1300,7 @@ async fn single_arg(
                         .await
                         .mem[addr as usize]
                 }
-                0xFFC0..=0xFFFE => {
+                0xFFC0..=0xFFFC => {
                     match STATE
                         .get()
                         .ok_or(EmulatorError::OnceEmpty)?
@@ -1299,6 +1329,24 @@ async fn single_arg(
                         },
                         None => 0x00,
                     }
+                }
+                0xFFFD => {
+                    (STATE
+                        .get()
+                        .ok_or(EmulatorError::OnceEmpty)?
+                        .read()
+                        .await
+                        .timer
+                        >> 8) as u8
+                }
+                0xFFFE => {
+                    (STATE
+                        .get()
+                        .ok_or(EmulatorError::OnceEmpty)?
+                        .read()
+                        .await
+                        .timer
+                        & 0xFF) as u8
                 }
                 0xFFFF => STATE
                     .get()
@@ -1428,7 +1476,7 @@ async fn double_arg(
                         .await
                         .mem[addr as usize] = value
                 }
-                0xFFC0..=0xFFFE => {
+                0xFFC0..=0xFFFC => {
                     match STATE
                         .get()
                         .ok_or(EmulatorError::OnceEmpty)?
@@ -1457,6 +1505,14 @@ async fn double_arg(
                         },
                         None => {}
                     }
+                }
+                0xFFFD => {
+                    let mut state = STATE.get().ok_or(EmulatorError::OnceEmpty)?.write().await;
+                    state.timer = (state.timer & 0x00FF) | ((value as u16) << 8)
+                }
+                0xFFFE => {
+                    let mut state = STATE.get().ok_or(EmulatorError::OnceEmpty)?.write().await;
+                    state.timer = (state.timer & 0xFF00) | ((value & 0xFF) as u16)
                 }
                 0xFFFF => {
                     STATE
