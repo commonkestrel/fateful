@@ -1,3 +1,6 @@
+@ifndef ARITHMETIC_MACROS
+@define ARITHMETIC_MACROS
+
 /// Adds two 16-bit integers
 @macro add16 (%h0:reg, %l0:reg, %h1:reg|imm, %l1:reg|imm) {
     add %l0, %l1
@@ -38,3 +41,5 @@
     nand %x, %y
     and %x, F
 }
+
+@endif

@@ -1,3 +1,6 @@
+@ifndef UTIL_MACROS
+@define UTIL_MACROS
+
 @macro push {
     ; push two registers
     (%r0:reg, %r1:reg) {
@@ -61,3 +64,5 @@
 @macro popa () {
     pop F, E, D, C, B, A
 }
+
+@endif

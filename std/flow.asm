@@ -1,3 +1,6 @@
+@ifndef FLOW_MACROS
+@define FLOW_MACROS
+
 @macro jmp {
     () {
         jnz 1
@@ -185,3 +188,5 @@
     pop L
     jmp
 }
+
+@endif
