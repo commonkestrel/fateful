@@ -19,7 +19,7 @@ use super::{
 use crate::{
     assembler::token::Error,
     diagnostic::{Diagnostic, Reference},
-    error, spanned_error, Token,
+    error, spanned_error, spanned_warn, Token,
 };
 
 use std::{collections::HashMap, iter, str::FromStr, sync::Arc};
@@ -670,8 +670,29 @@ fn expand_preproc(peek: Token, ctx: &mut Context) -> Result<(), Errors> {
 
             ctx.defines.insert(def.name, def.value);
         }
+        TI::Ident(lex::Ident::PreProc(PreProc::UnDef)) => {
+            let start = ctx.cursor.position;
+            ctx.cursor.position += 1;
+
+            let ident: Ident = ctx
+                .cursor
+                .parse()
+                .map_err(|err| Into::<Errors>::into(err))?;
+            if let None = ctx.defines.remove(&ident.value) {
+                spanned_warn!(ident.span, "define not found").emit();
+            }
+
+            ctx.cursor.stream.drain(start..ctx.cursor.position);
+            ctx.cursor.position = start;
+        }
         TI::Ident(lex::Ident::PreProc(PreProc::If)) => {
             eval_if(ctx).map_err(|err| Into::<Errors>::into(err))?
+        }
+        TI::Ident(lex::Ident::PreProc(PreProc::IfDef)) => {
+            eval_if_def(ctx, false).map_err(|err| Into::<Errors>::into(err))?
+        }
+        TI::Ident(lex::Ident::PreProc(PreProc::IfNDef)) => {
+            eval_if_def(ctx, true).map_err(|err| Into::<Errors>::into(err))?
         }
         TI::Ident(lex::Ident::PreProc(PreProc::Macro)) => {
             let start = ctx.cursor.position;
@@ -733,9 +754,20 @@ fn expand_preproc(peek: Token, ctx: &mut Context) -> Result<(), Errors> {
     Ok(())
 }
 
-fn eval_if(ctx: &mut Context) -> Result<(), Diagnostic> {
-    use TokenInner as TI;
+fn eval_if_def(ctx: &mut Context, ndef: bool) -> Result<(), Diagnostic> {
+    let start = ctx.cursor.position;
+    let if_def_span = ctx
+        .cursor
+        .next()
+        .ok_or_else(|| error!("`parse::eval_if_def` called with no tokens").as_bug())?
+        .span;
+    let def: Ident = ctx.cursor.parse()?;
+    let eval = ctx.defines.contains_key(&def.value);
 
+    expand_if(ctx, start, if_def_span, if ndef { !eval } else { eval })
+}
+
+fn eval_if(ctx: &mut Context) -> Result<(), Diagnostic> {
     let start = ctx.cursor.position;
     let if_span = ctx
         .cursor
@@ -744,28 +776,39 @@ fn eval_if(ctx: &mut Context) -> Result<(), Diagnostic> {
         .span;
 
     let eval = if_expr(ctx)?;
-    let mut depth = 0;
+    expand_if(ctx, start, if_span, eval)
+}
+
+fn expand_if(
+    ctx: &mut Context,
+    start: usize,
+    if_span: Arc<Span>,
+    eval: bool,
+) -> Result<(), Diagnostic> {
+    let mut depth = 1;
     let mut out = Vec::new();
 
+    use TokenInner as TI;
     while let Some(tok) = ctx.cursor.peek() {
         match tok.inner {
             TI::Ident(lex::Ident::PreProc(PreProc::If))
-            | TI::Ident(lex::Ident::PreProc(PreProc::IfDef)) => {
+            | TI::Ident(lex::Ident::PreProc(PreProc::IfDef))
+            | TI::Ident(lex::Ident::PreProc(PreProc::IfNDef)) => {
                 ctx.cursor.position += 1;
                 depth += 1;
             }
             TI::Ident(lex::Ident::PreProc(PreProc::EndIf)) => {
                 ctx.cursor.position += 1;
+                depth -= 1;
                 if depth == 0 {
                     break;
-                } else {
-                    depth -= 1;
                 }
             }
             TI::Ident(lex::Ident::PreProc(PreProc::ElIf)) => {
-                if depth == 0 {
+                if depth == 1 {
                     if eval {
-                        end_if(ctx, if_span)?;
+                        end_if(ctx, if_span.clone())?;
+                        depth -= 1;
                         break;
                     } else {
                         return eval_if(ctx);
@@ -773,18 +816,19 @@ fn eval_if(ctx: &mut Context) -> Result<(), Diagnostic> {
                 }
             }
             TI::Ident(lex::Ident::PreProc(PreProc::Else)) => {
-                if depth == 0 {
+                if depth == 1 {
                     if eval {
-                        end_if(ctx, if_span)?;
+                        end_if(ctx, if_span.clone())?;
+                        depth -= 1;
                         break;
                     } else {
                         while let Some(more) = ctx.cursor.next() {
                             if matches!(more.inner, TI::Ident(lex::Ident::PreProc(PreProc::EndIf)))
                             {
-                            } else {
+                                break;
                             }
                         }
-                        return Err(error!(""));
+                        return Err(error!("unmatched"));
                     }
                 }
             }
@@ -800,7 +844,11 @@ fn eval_if(ctx: &mut Context) -> Result<(), Diagnostic> {
         }
     }
 
-    ctx.cursor.stream.splice(start..=ctx.cursor.position, out);
+    if depth != 0 {
+        return Err(spanned_error!(if_span, "unclosed if expression; expected `@endif`, found `eof`"))
+    }
+
+    ctx.cursor.stream.splice(start..ctx.cursor.position, out);
     ctx.cursor.position = start;
 
     Ok(())
@@ -832,7 +880,7 @@ fn if_expr(ctx: &mut Context) -> Result<bool, Diagnostic> {
 }
 
 fn end_if(ctx: &mut Context, err_span: Arc<Span>) -> Result<(), Diagnostic> {
-    let mut depth = 0;
+    let mut depth = 1;
 
     while let Some(tok) = ctx.cursor.next() {
         use TokenInner as TI;
