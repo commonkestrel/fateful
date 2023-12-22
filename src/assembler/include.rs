@@ -9,9 +9,9 @@ use clio::Input;
 use phf::{phf_map, Map};
 
 static BUILT_INS: Map<&'static str, &str> = phf_map! {
-    "arithmetic" => include_str!("../../asm/arithmetic.asm"),
-    "flow" => include_str!("../../asm/flow.asm"),
-    "util" => include_str!("../../asm/util.asm"),
+    "arithmetic" => include_str!("../../std/arithmetic.asm"),
+    "flow" => include_str!("../../std/flow.asm"),
+    "util" => include_str!("../../std/util.asm"),
 };
 
 pub fn include(path: Path) -> Result<TokenStream, Errors> {
