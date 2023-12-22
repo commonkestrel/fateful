@@ -21,10 +21,17 @@ fn emit_errors(errors: Vec<Diagnostic>) -> Diagnostic {
 }
 
 #[inline]
-fn bank_assert(bank: u8, expected: Option<u8>) {
+fn bank_assert(bank: u8, expected: Option<u8>) -> Result<(), Diagnostic> {
     if let Some(reg) = expected {
-        assert_eq!(bank, reg);
+        if bank == reg {
+            Ok(())
+        } else {
+            Err(error!("register side does not equal expected value: {bank} != {reg}"))
+        }
+    } else {
+        Ok(())
     }
+
 }
 
 fn parse_expected(input: &str) -> Result<u8, ParseIntError> {
@@ -53,6 +60,7 @@ fn test_file(path: &str) -> Result<(), Diagnostic> {
 
     let input = clio::Input::new(path).unwrap();
     let lexed = lex::lex(input).map_err(emit_errors)?;
+    let mut run = true;
 
     let mut skipped = lexed.iter().filter(|tok| tok.inner != TokenInner::NewLine);
     while let Some(Token {
@@ -93,24 +101,36 @@ fn test_file(path: &str) -> Result<(), Diagnostic> {
             l = Some(parse_expected(val.trim()).map_err(|err| {
                 spanned_error!(span.clone(), "unable to parse 8-bit integer: {err}")
             })?);
+        } else if trimmed == "no-run" {
+            run = false;
         }
     }
 
     let parsed = parse::parse(lexed).map_err(emit_errors)?;
     let assembled = assemble::assemble(parsed).map_err(emit_errors)?;
 
-    let bank = test_emulate(assembled.into(), Duration::from_secs(1)).unwrap();
+    if run {
+        let bank = test_emulate(assembled.into(), Duration::from_secs(1)).unwrap();
 
-    bank_assert(bank.a, a);
-    bank_assert(bank.b, b);
-    bank_assert(bank.c, c);
-    bank_assert(bank.d, d);
-    bank_assert(bank.e, e);
-    bank_assert(bank.f, f);
-    bank_assert(bank.h, h);
-    bank_assert(bank.l, l);
+        bank_assert(bank.a, a)?;
+        bank_assert(bank.b, b)?;
+        bank_assert(bank.c, c)?;
+        bank_assert(bank.d, d)?;
+        bank_assert(bank.e, e)?;
+        bank_assert(bank.f, f)?;
+        bank_assert(bank.h, h)?;
+        bank_assert(bank.l, l)?;
+    }
 
     Ok(())
+}
+
+#[test]
+fn std() {
+    if let Err(err) = test_file("tests/std.asm") {
+        err.force_emit();
+        panic!();
+    }
 }
 
 #[test]
