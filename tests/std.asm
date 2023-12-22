@@ -1,4 +1,4 @@
-/// no-run=
+/// no-run
 
 @include <arithmetic>
 @include <flow>
