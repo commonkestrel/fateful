@@ -522,6 +522,7 @@ dependencies = [
  "clio",
  "colored",
  "env_logger",
+ "humantime",
  "libloading",
  "logos",
  "modular-bitfield",

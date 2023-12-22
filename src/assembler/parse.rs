@@ -845,7 +845,10 @@ fn expand_if(
     }
 
     if depth != 0 {
-        return Err(spanned_error!(if_span, "unclosed if expression; expected `@endif`, found `eof`"))
+        return Err(spanned_error!(
+            if_span,
+            "unclosed if expression; expected `@endif`, found `eof`"
+        ));
     }
 
     ctx.cursor.stream.splice(start..ctx.cursor.position, out);

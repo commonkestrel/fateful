@@ -1,20 +1,80 @@
-use crate::assembler::{
-    tests::{
-        assemble,
-        lex::{self, Token, TokenInner},
-        parse,
-    },
-    Verbosity, VERBOSITY,
+use clap::Args;
+use clio::Input;
+use thiserror::Error;
+
+use crate::assembler::tests::{
+    assemble,
+    lex::{self, Token, TokenInner},
+    parse,
 };
 use crate::emulator::test_emulate;
 use crate::{diagnostic::Diagnostic, error, spanned_error};
-use std::num::ParseIntError;
-use std::time::Duration;
+use crate::{Verbosity, VERBOSITY};
+
+use std::{
+    io::{stderr, stdout, Write},
+    num::ParseIntError,
+    thread,
+    time::Duration,
+};
+
+use colored::Colorize;
+
+#[derive(Debug, Args)]
+pub struct TestArgs {
+    inputs: Vec<Input>,
+    #[clap(short, long, default_value = "500ms")]
+    timeout: humantime::Duration,
+}
+
+pub async fn test_all(args: TestArgs) -> Result<(), ()> {
+    let mut handles = Vec::new();
+
+    for input in args.inputs {
+        let name = format!("{input}");
+
+        handles.push((
+            name.clone(),
+            thread::spawn(move || {
+                let mut output = Vec::new();
+                let name = format!("{input}");
+
+                match test_file(input, args.timeout.into(), &mut output) {
+                    Ok(_) => {
+                        println!("{name} - {}", "success".green());
+                        Ok(())
+                    }
+                    Err(err) => {
+                        writeln!(output, "{err}").unwrap();
+                        println!("{name} - {}", "failure".red());
+                        Err(output)
+                    }
+                }
+            }),
+        ));
+    }
+
+    for handle in handles {
+        handle
+            .1
+            .join()
+            .expect("one of the test threads panicked")
+            .map_err(|err| {
+                println!("\n---- {} stdout ----", handle.0);
+                stdout().write(&err).unwrap();
+                println!();
+
+                ()
+            })?;
+    }
+
+    Ok(())
+}
 
 #[inline]
-fn emit_errors(errors: Vec<Diagnostic>) -> Diagnostic {
+fn emit_errors(errors: Vec<Diagnostic>, mut out: impl std::io::Write) -> Diagnostic {
     for err in errors {
-        err.emit();
+        write!(out, "{err}").unwrap();
     }
 
     error!("unable to assemble due to previous errors")
@@ -26,12 +86,13 @@ fn bank_assert(bank: u8, expected: Option<u8>) -> Result<(), Diagnostic> {
         if bank == reg {
             Ok(())
         } else {
-            Err(error!("register side does not equal expected value: {bank} != {reg}"))
+            Err(error!(
+                "register side does not equal expected value: {bank} != {reg}"
+            ))
         }
     } else {
         Ok(())
     }
-
 }
 
 fn parse_expected(input: &str) -> Result<u8, ParseIntError> {
@@ -46,7 +107,11 @@ fn parse_expected(input: &str) -> Result<u8, ParseIntError> {
     }
 }
 
-fn test_file(path: &str) -> Result<(), Diagnostic> {
+fn test_file(
+    input: Input,
+    timeout: Duration,
+    mut out: impl std::io::Write,
+) -> Result<(), Diagnostic> {
     VERBOSITY.get_or_init(|| Verbosity::Error);
 
     let mut a = None;
@@ -58,8 +123,7 @@ fn test_file(path: &str) -> Result<(), Diagnostic> {
     let mut h = None;
     let mut l = None;
 
-    let input = clio::Input::new(path).unwrap();
-    let lexed = lex::lex(input).map_err(emit_errors)?;
+    let lexed = lex::lex(input).map_err(|errors| emit_errors(errors, &mut out))?;
     let mut run = true;
 
     let mut skipped = lexed.iter().filter(|tok| tok.inner != TokenInner::NewLine);
@@ -106,11 +170,12 @@ fn test_file(path: &str) -> Result<(), Diagnostic> {
         }
     }
 
-    let parsed = parse::parse(lexed).map_err(emit_errors)?;
-    let assembled = assemble::assemble(parsed).map_err(emit_errors)?;
+    let parsed = parse::parse(lexed).map_err(|errors| emit_errors(errors, &mut out))?;
+    let assembled = assemble::assemble(parsed).map_err(|errors| emit_errors(errors, &mut out))?;
 
     if run {
-        let bank = test_emulate(assembled.into(), Duration::from_secs(1)).unwrap();
+        let bank = test_emulate(assembled.into(), timeout)
+            .map_err(|_| error!("emulator exceeded timeout"))?;
 
         bank_assert(bank.a, a)?;
         bank_assert(bank.b, b)?;
@@ -127,23 +192,33 @@ fn test_file(path: &str) -> Result<(), Diagnostic> {
 
 #[test]
 fn std() {
-    if let Err(err) = test_file("tests/std.asm") {
-        err.force_emit();
-        panic!();
+    if let Err(err) = test_file(
+        Input::new("tests/std.asm").unwrap(),
+        Duration::from_secs(1),
+        stderr(),
+    ) {
+        err.scream();
     }
 }
 
 #[test]
 fn fib() {
-    if let Err(err) = test_file("tests/fib.asm") {
-        err.force_emit();
-        panic!();
+    if let Err(err) = test_file(
+        Input::new("tests/fib.asm").unwrap(),
+        Duration::from_secs(1),
+        stderr(),
+    ) {
+        err.scream();
     }
 }
 
 #[test]
 fn mem() {
-    if let Err(err) = test_file("tests/mem.asm") {
+    if let Err(err) = test_file(
+        Input::new("tests/mem.asm").unwrap(),
+        Duration::from_secs(1),
+        stderr(),
+    ) {
         err.scream()
     }
 }
@@ -151,7 +226,11 @@ fn mem() {
 #[test]
 #[should_panic]
 fn timeout() {
-    if let Err(err) = test_file("tests/timeout.asm") {
+    if let Err(err) = test_file(
+        Input::new("tests/timeout.asm").unwrap(),
+        Duration::from_secs(1),
+        stderr(),
+    ) {
         err.scream()
     }
 }

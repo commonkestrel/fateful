@@ -18,11 +18,12 @@ clap-verbosity-flag = "2.1"
 clio = { version = "0.3", features = ["clap-parse"] }
 colored = "2"
 env_logger = "0.10"
-libloading = "0.8.1"
+humantime = "2.1"
+libloading = "0.8"
 logos = "0.13"
 modular-bitfield = "0.11"
 once_cell = "1.18"
-phf = { version = "0.11.2", features = ["macros"] }
+phf = { version = "0.11", features = ["macros"] }
 regex = "1.10"
 shadow-rs = "0.25"
 thiserror = "1"

@@ -53,7 +53,6 @@ pub enum EmulatorError {
     OnceFull,
     #[error("global state not initialized yet")]
     OnceEmpty,
-    #[cfg(test)]
     #[error("emulator timed out waiting for halt")]
     Timeout,
 }
@@ -1109,7 +1108,6 @@ async fn handle_input(
     Ok(())
 }
 
-#[cfg(test)]
 pub fn test_emulate(program: Box<[u8]>, timeout: Duration) -> Result<RegBank, EmulatorError> {
     let start = Instant::now();
     let mut state = State::init(program);

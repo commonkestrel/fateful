@@ -1,6 +1,6 @@
-use super::assembler::lex::Span;
-use super::assembler::Errors;
-use super::assembler::VERBOSITY;
+use crate::assembler::lex::Span;
+use crate::assembler::Errors;
+use crate::VERBOSITY;
 
 use std::{error::Error, fmt, sync::Arc};
 
@@ -481,14 +481,14 @@ pub enum Level {
     Note = 4,
 }
 
-impl PartialEq<super::assembler::Verbosity> for Level {
-    fn eq(&self, other: &super::assembler::Verbosity) -> bool {
+impl PartialEq<super::Verbosity> for Level {
+    fn eq(&self, other: &super::Verbosity) -> bool {
         (*self as u8) == (*other as u8)
     }
 }
 
-impl PartialOrd<super::assembler::Verbosity> for Level {
-    fn partial_cmp(&self, other: &super::assembler::Verbosity) -> Option<std::cmp::Ordering> {
+impl PartialOrd<super::Verbosity> for Level {
+    fn partial_cmp(&self, other: &super::Verbosity) -> Option<std::cmp::Ordering> {
         (*self as u8).partial_cmp(&(*other as u8))
     }
 }

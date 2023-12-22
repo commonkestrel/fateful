@@ -12,7 +12,6 @@ mod token;
 pub use crate::diagnostic::{Diagnostic, OptionalScream, ResultScream};
 use crate::error;
 
-#[cfg(test)]
 pub mod tests {
     pub use super::{
         assemble,
@@ -21,13 +20,11 @@ pub mod tests {
     };
 }
 
-use colored::Colorize;
-
-use std::{sync::OnceLock, time::Instant};
+use std::time::Instant;
 
 use clap::Args;
-use clap_verbosity_flag::{Level, WarnLevel};
 use clio::{Input, Output};
+use colored::Colorize;
 
 #[derive(Debug, Args)]
 pub struct AssemblerArgs {
@@ -45,23 +42,7 @@ pub struct AssemblerArgs {
 
 pub type Errors = Vec<Diagnostic>;
 
-pub static VERBOSITY: OnceLock<Verbosity> = OnceLock::new();
-
-pub async fn assemble(
-    mut args: AssemblerArgs,
-    verbosity: clap_verbosity_flag::Verbosity<WarnLevel>,
-) -> Result<(), Errors> {
-    let verbose = match verbosity.log_level() {
-        Some(level) => match level {
-            Level::Error => Verbosity::Error,
-            Level::Warn => Verbosity::Warn,
-            Level::Info => Verbosity::Help,
-            Level::Debug | Level::Trace => Verbosity::Info,
-        },
-        None => Verbosity::Quiet,
-    };
-    VERBOSITY.set(verbose).expect("verbosity should be empty");
-
+pub async fn assemble(mut args: AssemblerArgs) -> Result<(), Errors> {
     let start = Instant::now();
     let input = format!("{}", args.input);
 
@@ -87,25 +68,4 @@ pub async fn assemble(
     );
 
     Ok(())
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Verbosity {
-    Quiet = 0,
-    Error = 1,
-    Warn = 2,
-    Help = 3,
-    Info = 4,
-}
-
-impl PartialOrd for Verbosity {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        (*self as u8).partial_cmp(&(*other as u8))
-    }
-}
-
-impl Ord for Verbosity {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        (*self as u8).cmp(&(*other as u8))
-    }
 }
