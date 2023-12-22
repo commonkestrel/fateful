@@ -1,6 +1,5 @@
-/// no-run
+/// Includes all built-in macros
 
-@include <macros>
 @include <arithmetic>
 @include <flow>
 @include <util>
