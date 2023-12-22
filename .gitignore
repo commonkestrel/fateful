@@ -5,3 +5,4 @@ zig-out
 *.dll
 *.so
 *.dylib
+*.exe
