@@ -10,8 +10,6 @@ use crate::emulator::test_emulate;
 use crate::{diagnostic::Diagnostic, error, spanned_error};
 use crate::{Verbosity, VERBOSITY};
 
-#[cfg(test)]
-use std::io::stderr;
 use std::{
     io::{stdout, Write},
     num::ParseIntError,
@@ -196,7 +194,7 @@ fn std() {
     if let Err(err) = test_file(
         Input::new("tests/std.asm").unwrap(),
         Duration::from_millis(250),
-        stderr(),
+        stdout(),
     ) {
         err.scream();
     }
@@ -207,7 +205,7 @@ fn fib() {
     if let Err(err) = test_file(
         Input::new("tests/fib.asm").unwrap(),
         Duration::from_millis(250),
-        stderr(),
+        stdout(),
     ) {
         err.scream();
     }
@@ -218,7 +216,18 @@ fn mem() {
     if let Err(err) = test_file(
         Input::new("tests/mem.asm").unwrap(),
         Duration::from_millis(250),
-        stderr(),
+        stdout(),
+    ) {
+        err.scream()
+    }
+}
+
+#[test]
+fn comments() {
+    if let Err(err) = test_file(
+        Input::new("tests/comments.asm").unwrap(),
+        Duration::from_millis(250),
+        stdout(),
     ) {
         err.scream()
     }
@@ -230,7 +239,7 @@ fn timeout() {
     if let Err(err) = test_file(
         Input::new("tests/timeout.asm").unwrap(),
         Duration::from_millis(250),
-        stderr(),
+        stdout(),
     ) {
         err.scream()
     }

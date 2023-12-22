@@ -193,7 +193,8 @@ where
 
 #[derive(Logos, Clone, Debug, PartialEq)]
 #[logos(error = Diagnostic)]
-#[logos(skip r"(//|;)[^\n]*")]
+#[logos(skip r"(//|;|#)[^\n]*\n?")]
+#[logos(skip r"/\*(?:[^*]|\*[^/])*\*/")]
 #[logos(skip r"[ \t\f]")]
 pub enum TokenInner {
     #[regex(r"0b[01][_01]*", TokenInner::binary)]
