@@ -163,40 +163,6 @@
     }
 }
 
-/// jump if equal
-@macro jeq {
-    (%x:imm, %y:imm, %location:label) {
-        lda %location
-        jnz (%x == %y)
-    }
-    (%x:reg, %y:reg|imm) {
-        cmp %x, %y
-        ld F, [0xFFFF]
-        nand F, (1 << 3)
-        nand F, F
-        jnz F
-    }
-    (%x:reg, %y:reg|imm, %location:label) {
-        cmp %x, %y
-        ld F, [0xFFFF]
-        nand F, (1 << 3)
-        nand F, F
-        nz F, %location
-    }
-    (%location:label) {
-        ld F, [0xFFFF]
-        nand F, (1 << 3)
-        nand F, F
-        jnz F, %location
-    }
-    () {
-        ld F, [0xFFFF]
-        nand F, (1 << 3)
-        nand F, F
-        jnz F
-    }
-}
-
 @macro jz (%condition:reg|imm, %location:label) {
     jeq %condition, 0, %location
 }
