@@ -1,4 +1,8 @@
-; calculates the 8th fibonacci number and leaves the result in d
+/// a: 0x0D
+/// b: 0x15
+/// c: 0x00
+/// d: 0x15
+/// calculates the 8th fibonacci number and leaves the result in d
 
 @org 0x0000
 @define COUNT 7
