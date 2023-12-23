@@ -8,7 +8,7 @@ build = "build.rs"
 rust-version = "1.70.0"
 
 [workspace]
-members = ["examples/advanced", "examples/multi-port", "examples/rust-peripheral"]
+members = ["examples/advanced", "examples/multi-port", "examples/rust-peripheral", "screen"]
 
 [dependencies]
 async-std = { version="1", features = ["attributes"] }

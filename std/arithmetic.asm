@@ -13,12 +13,20 @@
     sbc %h0, %h1
 }
 
-/// Increments the given byte
-@macro inc (%reg:reg) {
-    add %reg, 1
+/// Increments the given value
+@macro inc {
+    ; 8-bit
+    (%reg:reg) {
+        add %reg, 1
+    }
+    ; 16-bit
+    (%low:reg, %high:reg) {
+        add %low, 1
+        adc %high, 0
+    }
 }
 
-/// Decrements the given byte
+/// Decrements the given value
 @macro dec (%reg:reg) {
     sub %reg, 1
 }
