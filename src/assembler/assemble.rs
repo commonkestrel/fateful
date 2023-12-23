@@ -357,6 +357,7 @@ impl TryFrom<Inst> for Instruction {
                         args.len()
                     ));
                 }
+                
                 let (reg, regimm) = pull_double(args)?;
                 Ok(Instruction::Add(reg, regimm))
             }
@@ -368,6 +369,7 @@ impl TryFrom<Inst> for Instruction {
                         args.len()
                     ));
                 }
+
                 let (reg, regimm) = pull_double(args)?;
                 Ok(Instruction::Sub(reg, regimm))
             }
@@ -379,6 +381,7 @@ impl TryFrom<Inst> for Instruction {
                         args.len()
                     ));
                 }
+
                 let (reg, regimm) = pull_double(args)?;
                 Ok(Instruction::Adc(reg, regimm))
             }
@@ -390,6 +393,7 @@ impl TryFrom<Inst> for Instruction {
                         args.len()
                     ));
                 }
+
                 let (reg, regimm) = pull_double(args)?;
                 Ok(Instruction::Sbc(reg, regimm))
             }
@@ -401,6 +405,7 @@ impl TryFrom<Inst> for Instruction {
                         args.len()
                     ));
                 }
+
                 let (reg, regimm) = pull_double(args)?;
                 Ok(Instruction::Nand(reg, regimm))
             }
@@ -412,6 +417,7 @@ impl TryFrom<Inst> for Instruction {
                         args.len()
                     ));
                 }
+
                 let (reg, regimm) = pull_double(args)?;
                 Ok(Instruction::Or(reg, regimm))
             }
@@ -423,6 +429,7 @@ impl TryFrom<Inst> for Instruction {
                         args.len()
                     ));
                 }
+
                 let (reg, regimm) = pull_double(args)?;
                 Ok(Instruction::Cmp(reg, regimm))
             }
@@ -434,6 +441,7 @@ impl TryFrom<Inst> for Instruction {
                         args.len()
                     ));
                 }
+
                 let (reg, regimm) = pull_double(args)?;
                 Ok(Instruction::Mv(reg, regimm))
             }
@@ -579,6 +587,14 @@ impl TryFrom<Inst> for Instruction {
                 }
             }
             "push" => {
+                if args.len() != 1 {
+                    return Err(spanned_error!(
+                        value.name.span,
+                        "expected 1 argument, found {}",
+                        args.len()
+                    ));
+                }
+
                 let regimm = match args.swap_remove(0) {
                     Argument::Reg(reg) => RegImm::Register(reg.inner),
                     Argument::Immediate(imm) => RegImm::Immediate(
@@ -599,6 +615,14 @@ impl TryFrom<Inst> for Instruction {
                 Ok(Instruction::Push(regimm))
             }
             "pop" => {
+                if args.len() != 1 {
+                    return Err(spanned_error!(
+                        value.name.span,
+                        "expected 1 argument, found {}",
+                        args.len()
+                    ));
+                }
+
                 let reg = match args.swap_remove(0) {
                     Argument::Reg(reg) => reg.inner,
                     arg => {
@@ -613,6 +637,14 @@ impl TryFrom<Inst> for Instruction {
                 Ok(Instruction::Pop(reg))
             }
             "jnz" => {
+                if args.len() != 1 {
+                    return Err(spanned_error!(
+                        value.name.span,
+                        "expected 1 argument, found {}",
+                        args.len()
+                    ));
+                }
+
                 let regimm = match args.swap_remove(0) {
                     Argument::Reg(reg) => RegImm::Register(reg.inner),
                     Argument::Immediate(imm) => RegImm::Immediate(
@@ -636,7 +668,7 @@ impl TryFrom<Inst> for Instruction {
                 0 => Ok(Instruction::Halt),
                 len => Err(spanned_error!(
                     value.name.span,
-                    "expected 0 arguments, found {len}"
+                    "didn't expect any arguments, found {len}"
                 )),
             },
             _ => Err(spanned_error!(value.name.span, "unknown instruction")),
