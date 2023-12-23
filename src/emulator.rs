@@ -1392,10 +1392,10 @@ async fn double_arg(
     mut ewriter: impl std::io::Write,
 ) -> Result<(), EmulatorError> {
     let count = args.into_iter().filter(|arg| arg.trim().len() > 0).count();
-    if count != 1 {
+    if count != 2 {
         writeln!(
             ewriter,
-            "ARGUMENT ERROR: expected `2` arguments, fount `{count}`"
+            "ARGUMENT ERROR: expected `2` arguments, found `{count}`"
         )
         .map_err(|err| EmulatorError::Out(err))?;
         return Ok(());
