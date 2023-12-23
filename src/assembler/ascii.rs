@@ -105,7 +105,7 @@ pub fn unescape_str<'a>(s: &'a str) -> Result<AsciiStr, UnescapeError> {
 
     let owned = numbered.to_owned();
     numbered = {
-        let octal = Regex::new(r"\\[0-7]{3}").unwrap();
+        let octal = Regex::new(r"\\o[0-7]{3}").unwrap();
 
         octal.replace_all(&owned, |cap: &Captures<'_>| {
             // The Regex expression guarantees a valid octal.
