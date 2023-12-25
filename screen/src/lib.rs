@@ -8,10 +8,7 @@ use fateful_peripheral::{peripheral, Peripheral};
 use minifb::{Scale, Window, WindowOptions};
 
 enum Event {
-    Write {
-        addr: u16,
-        data: u8,
-    },
+    Write { addr: u16, data: u8 },
     Quit,
     Reset,
 }
@@ -54,7 +51,10 @@ impl Peripheral for State {
                 self.addr_high = None;
                 self.addr_low = None;
                 self.tx
-                    .send(Event::Write{addr: ((high as u16) << 8) | (low as u16), data})
+                    .send(Event::Write {
+                        addr: ((high as u16) << 8) | (low as u16),
+                        data,
+                    })
                     .unwrap()
             }
             _ => {}
@@ -95,7 +95,7 @@ fn window(rx: Receiver<Event>) {
                     for i in 0..8 {
                         buffer[base + i] = if (data & 1 << i) != 0 { u32::MAX } else { 0 };
                     }
-                    
+
                     redraw = true;
                 }
                 Event::Quit => break,
