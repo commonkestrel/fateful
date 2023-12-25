@@ -317,8 +317,7 @@ impl ParseTok {
                 inner: TokenInner::Delimeter(Delimeter::OpenParen),
             }) => {
                 let expr = parenthesized!(cursor)?;
-                let empty = HashMap::new();
-                let eval = eval::eval_expr(expr, &empty, &empty)?;
+                let eval = eval::eval_expr(&expr, &mut HashMap::new(), &mut HashMap::new())?;
 
                 eval.value
                     .try_into()
@@ -346,8 +345,7 @@ impl ParseTok {
                 .try_into()
                 .map_err(|_| error!("immediate out of range")),
             Argument::Expr(expr) => {
-                let empty = HashMap::new();
-                let eval = eval::eval_expr(expr.clone(), &empty, &empty)?;
+                let eval = eval::eval_expr(expr, &mut HashMap::new(), &mut HashMap::new())?;
                 eval.value
                     .try_into()
                     .map_err(|_| spanned_error!(eval.span, "byte literal out of range"))

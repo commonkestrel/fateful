@@ -1,6 +1,7 @@
 use std::ops::{Deref, Range};
 use std::sync::Arc;
 
+use crate::spanned_warn;
 use crate::{
     assembler::{
         eval,
@@ -38,6 +39,12 @@ const PUSH: u8 = 0xC0;
 const POP: u8 = 0xD0;
 const JNZ: u8 = 0xE0;
 const HALT: u8 = 0xF0;
+
+pub struct Usable {
+    pub address: u16,
+    pub span: Arc<Span>,
+    pub uses: usize,
+}
 
 enum Instruction {
     Add(Register, RegImm),
@@ -96,8 +103,8 @@ impl Instruction {
         self,
         pc: u16,
         parent: &str,
-        data: &HashMap<String, (u16, Arc<Span>)>,
-        labels: &HashMap<String, (u16, Arc<Span>)>,
+        data: &mut HashMap<String, Usable>,
+        labels: &mut HashMap<String, Usable>,
     ) -> Result<Bytes, Diagnostic> {
         match self {
             Instruction::Add(reg, regimm) => {
@@ -167,7 +174,7 @@ impl Instruction {
                     let span = Span::same_line(&expr.open.span, &expr.close.span);
                     Ok(Bytes::Double([
                         PUSH | IMMEDIATE_MASK,
-                        eval::eval_expr(expr, labels, data)?
+                        eval::eval_expr(&expr, labels, data)?
                             .value
                             .try_into()
                             .map_err(|_| spanned_error!(span, "immediate out of range"))?,
@@ -183,7 +190,7 @@ impl Instruction {
                     let span = Span::same_line(&expr.open.span, &expr.close.span);
                     Ok(Bytes::Double([
                         JNZ | IMMEDIATE_MASK,
-                        eval::eval_expr(expr, labels, data)?
+                        eval::eval_expr(&expr, labels, data)?
                             .value
                             .try_into()
                             .map_err(|_| spanned_error!(span, "immediate out of range"))?,
@@ -210,8 +217,8 @@ impl Instruction {
         regimm: RegImm,
         pc: u16,
         parent: &str,
-        labels: &HashMap<String, (u16, Arc<Span>)>,
-        data: &HashMap<String, (u16, Arc<Span>)>,
+        labels: &mut HashMap<String, Usable>,
+        data: &mut HashMap<String, Usable>,
     ) -> Result<Bytes, Diagnostic> {
         match regimm {
             RegImm::Register(second) => Ok(Bytes::Double([instruction | reg as u8, second as u8])),
@@ -225,7 +232,7 @@ impl Instruction {
                 let expr_span = Span::same_line(&expr.open.span, &expr.close.span);
                 Ok(Bytes::Double([
                     instruction | IMMEDIATE_MASK | reg as u8,
-                    eval::eval_expr(expr, labels, data)?
+                    eval::eval_expr(&expr, labels, data)?
                         .value
                         .try_into()
                         .map_err(|_| spanned_error!(expr_span, "immediate out of range"))?,
@@ -238,7 +245,7 @@ impl Instruction {
         mut expr: Bracketed<TokenStream>,
         pc: u16,
         parent: &str,
-        labels: &HashMap<String, (u16, Arc<Span>)>,
+        labels: &mut HashMap<String, Usable>,
     ) -> Result<u16, Diagnostic> {
         for tok in expr.inner.iter_mut() {
             if let TokenInner::Location = tok.inner {
@@ -255,7 +262,7 @@ impl Instruction {
             }
         }
 
-        let addr = eval::eval_bracketed(expr, labels)?;
+        let addr = eval::eval_bracketed(expr, labels, false)?;
         addr.value
             .try_into()
             .map_err(|_| spanned_error!(addr.span, "address not in range"))
@@ -263,7 +270,7 @@ impl Instruction {
 
     fn eval_address(
         mut expr: Bracketed<TokenStream>,
-        variables: &HashMap<String, (u16, Arc<Span>)>,
+        variables: &mut HashMap<String, Usable>,
     ) -> Result<u16, Diagnostic> {
         for tok in expr.inner.iter_mut() {
             if let TokenInner::Location = tok.inner {
@@ -279,7 +286,7 @@ impl Instruction {
             }
         }
 
-        let addr = eval::eval_bracketed(expr, variables)?;
+        let addr = eval::eval_bracketed(expr, variables, true)?;
         addr.value
             .try_into()
             .map_err(|_| spanned_error!(addr.span, "address not in range"))
@@ -289,8 +296,8 @@ impl Instruction {
         mut expr: Bracketed<TokenStream>,
         pc: u16,
         parent: &str,
-        labels: &HashMap<String, (u16, Arc<Span>)>,
-        variables: &HashMap<String, (u16, Arc<Span>)>,
+        labels: &mut HashMap<String, Usable>,
+        variables: &mut HashMap<String, Usable>,
     ) -> Result<u16, Diagnostic> {
         let mut mem = None;
         let mut prog = None;
@@ -335,7 +342,11 @@ impl Instruction {
             }
         }
 
-        let evaled = eval::eval_bracketed(expr, if mem.is_some() { variables } else { labels })?;
+        let evaled = eval::eval_bracketed(
+            expr,
+            if mem.is_some() { variables } else { labels },
+            mem.is_some(),
+        )?;
         evaled
             .value
             .try_into()
@@ -357,7 +368,7 @@ impl TryFrom<Inst> for Instruction {
                         args.len()
                     ));
                 }
-                
+
                 let (reg, regimm) = pull_double(args)?;
                 Ok(Instruction::Add(reg, regimm))
             }
@@ -733,7 +744,7 @@ impl Deref for Bytes {
 
 fn compile(
     stream: Vec<ExpSeg>,
-    data: HashMap<String, (u16, Arc<Span>)>,
+    mut data: HashMap<String, Usable>,
 ) -> Result<[u8; 1 << 16], Errors> {
     let mut errors = Errors::new();
     let mut labels = HashMap::new();
@@ -763,12 +774,18 @@ fn compile(
                     };
 
                     let span = label.name.span.clone();
-                    if let Some((_, prev_span)) = labels.insert(name, (pc, label.name.span.clone()))
-                    {
+                    if let Some(prev) = labels.insert(
+                        name,
+                        Usable {
+                            address: pc,
+                            span: label.name.span.clone(),
+                            uses: 0,
+                        },
+                    ) {
                         errors.push(Diagnostic::referencing_error(
                             span,
                             "duplicate label definitions",
-                            Reference::new(prev_span, "previous definition found here"),
+                            Reference::new(prev.span, "previous definition found here"),
                         ));
                     }
                 }
@@ -824,7 +841,7 @@ fn compile(
         for expr in segment.instructions {
             match expr {
                 ExpTok::Instruction(inst) => {
-                    let inst = match inst.compile(pc, &parent, &data, &labels) {
+                    let inst = match inst.compile(pc, &parent, &mut data, &mut labels) {
                         Ok(inst) => inst,
                         Err(err) => {
                             errors.push(err);
@@ -852,6 +869,18 @@ fn compile(
         }
     }
 
+    for (_, label) in labels {
+        if label.uses == 0 {
+            spanned_warn!(label.span, "unused label definition").emit()
+        }
+    }
+
+    for (_, var) in data {
+        if var.uses == 0 {
+            spanned_warn!(var.span, "unused variable definition").emit()
+        }
+    }
+
     if errors.is_empty() {
         Ok(program)
     } else {
@@ -865,7 +894,7 @@ enum RegImm {
     Register(Register),
 }
 
-pub fn assemble_data(stream: Vec<DSeg>) -> Result<HashMap<String, (u16, Arc<Span>)>, Errors> {
+pub fn assemble_data(stream: Vec<DSeg>) -> Result<HashMap<String, Usable>, Errors> {
     let mut variables = HashMap::new();
     let mut errors = Errors::new();
     let mut ranges: Vec<std::ops::Range<u16>> = Vec::new();
@@ -915,11 +944,18 @@ pub fn assemble_data(stream: Vec<DSeg>) -> Result<HashMap<String, (u16, Arc<Span
 
         for (name, (variable, span)) in segment.variables.iter() {
             let span = span.clone();
-            if let Some((_, prev)) = variables.insert(name.to_owned(), (ptr, span.clone())) {
+            if let Some(prev) = variables.insert(
+                name.to_owned(),
+                Usable {
+                    address: ptr,
+                    span: span.clone(),
+                    uses: 0,
+                },
+            ) {
                 errors.push(Diagnostic::referencing_error(
                     span,
                     "duplicate variable definition",
-                    Reference::new(prev, "variable previously defined here"),
+                    Reference::new(prev.span, "variable previously defined here"),
                 ))
             }
             ptr += variable;

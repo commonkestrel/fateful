@@ -46,6 +46,7 @@
 //! ```
 
 use super::{
+    assemble::Usable,
     lex::{Delimeter, Ident, Punctuation, Span, Token, TokenInner, TokenStream},
     parse::{Bracketed, Parenthesized},
     token::Immediate,
@@ -55,9 +56,9 @@ use std::{collections::HashMap, iter::Peekable};
 use std::{fmt, slice::Iter, sync::Arc};
 
 pub fn eval_expr(
-    tokens: Parenthesized<TokenStream>,
-    labels: &HashMap<String, (u16, Arc<Span>)>,
-    variables: &HashMap<String, (u16, Arc<Span>)>,
+    tokens: &Parenthesized<TokenStream>,
+    labels: &mut HashMap<String, Usable>,
+    variables: &mut HashMap<String, Usable>,
 ) -> Result<Immediate, Diagnostic> {
     let span = Arc::new(Span {
         line: tokens.open.span.line,
@@ -78,7 +79,8 @@ pub fn eval_expr(
 
 pub fn eval_bracketed(
     tokens: Bracketed<TokenStream>,
-    locations: &HashMap<String, (u16, Arc<Span>)>,
+    locations: &mut HashMap<String, Usable>,
+    mem: bool,
 ) -> Result<Immediate, Diagnostic> {
     let span = Arc::new(Span {
         line: tokens.open.span.line,
@@ -91,7 +93,13 @@ pub fn eval_bracketed(
             .with_help("expressions must evaluate to a number"));
     }
 
-    Tree::parse(&tokens, &HashMap::new(), locations, locations).map(|tree| Immediate {
+    let tree = if mem {
+        Tree::parse(&tokens, &HashMap::new(), &mut HashMap::new(), locations)
+    } else {
+        Tree::parse(&tokens, &HashMap::new(), locations, &mut HashMap::new())
+    };
+
+    tree.map(|tree| Immediate {
         value: tree.eval(),
         span,
     })
@@ -101,8 +109,7 @@ pub fn eval_preproc(
     tokens: &[Token],
     defines: &HashMap<String, TokenStream>,
 ) -> Result<i128, Diagnostic> {
-    let empty = HashMap::new();
-    Tree::parse(tokens, defines, &empty, &empty).map(|tree| tree.eval())
+    Tree::parse(tokens, defines, &mut HashMap::new(), &mut HashMap::new()).map(|tree| tree.eval())
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -149,8 +156,8 @@ impl Tree {
     fn parse(
         tokens: &[Token],
         defines: &HashMap<String, TokenStream>,
-        labels: &HashMap<String, (u16, Arc<Span>)>,
-        variables: &HashMap<String, (u16, Arc<Span>)>,
+        labels: &mut HashMap<String, Usable>,
+        variables: &mut HashMap<String, Usable>,
     ) -> Result<Tree, Diagnostic> {
         let mut iter = tokens.iter().peekable();
         Tree::parse_c(&mut iter, defines, labels, variables)
@@ -160,8 +167,8 @@ impl Tree {
     fn parse_c(
         tokens: &mut Peekable<Iter<Token>>,
         defines: &HashMap<String, TokenStream>,
-        labels: &HashMap<String, (u16, Arc<Span>)>,
-        variables: &HashMap<String, (u16, Arc<Span>)>,
+        labels: &mut HashMap<String, Usable>,
+        variables: &mut HashMap<String, Usable>,
     ) -> Result<Tree, Diagnostic> {
         use TokenInner as TI;
 
@@ -190,8 +197,8 @@ impl Tree {
     fn parse_b(
         tokens: &mut Peekable<Iter<Token>>,
         defines: &HashMap<String, TokenStream>,
-        labels: &HashMap<String, (u16, Arc<Span>)>,
-        variables: &HashMap<String, (u16, Arc<Span>)>,
+        labels: &mut HashMap<String, Usable>,
+        variables: &mut HashMap<String, Usable>,
     ) -> Result<Tree, Diagnostic> {
         use TokenInner as TI;
 
@@ -240,8 +247,8 @@ impl Tree {
     fn parse_e(
         tokens: &mut Peekable<Iter<Token>>,
         defines: &HashMap<String, TokenStream>,
-        labels: &HashMap<String, (u16, Arc<Span>)>,
-        variables: &HashMap<String, (u16, Arc<Span>)>,
+        labels: &mut HashMap<String, Usable>,
+        variables: &mut HashMap<String, Usable>,
     ) -> Result<Tree, Diagnostic> {
         use TokenInner as TI;
 
@@ -295,8 +302,8 @@ impl Tree {
     fn parse_t(
         tokens: &mut Peekable<Iter<Token>>,
         defines: &HashMap<String, TokenStream>,
-        labels: &HashMap<String, (u16, Arc<Span>)>,
-        variables: &HashMap<String, (u16, Arc<Span>)>,
+        labels: &mut HashMap<String, Usable>,
+        variables: &mut HashMap<String, Usable>,
     ) -> Result<Tree, Diagnostic> {
         use TokenInner as TI;
 
@@ -325,8 +332,8 @@ impl Tree {
     fn parse_f(
         tokens: &mut Peekable<Iter<Token>>,
         defines: &HashMap<String, TokenStream>,
-        labels: &HashMap<String, (u16, Arc<Span>)>,
-        variables: &HashMap<String, (u16, Arc<Span>)>,
+        labels: &mut HashMap<String, Usable>,
+        variables: &mut HashMap<String, Usable>,
     ) -> Result<Tree, Diagnostic> {
         use TokenInner as TI;
         match tokens.next() {
@@ -336,8 +343,9 @@ impl Tree {
                     Ident::Ident(name) => {
                         if let Some(def) = defines.get(name) {
                             Tree::parse(def, defines, labels, variables)
-                        } else if let Some(label) = labels.get(name) {
-                            Ok(Tree::Literal(label.0 as i128))
+                        } else if let Some(label) = labels.get_mut(name) {
+                            label.uses += 1;
+                            Ok(Tree::Literal(label.address as i128))
                         } else {
                             Err(spanned_error!(
                                 tok.span.clone(),
@@ -345,8 +353,11 @@ impl Tree {
                             ))
                         }
                     }
-                    Ident::Variable(name) => match variables.get(name) {
-                        Some(var) => Ok(Tree::Literal(var.0 as i128)),
+                    Ident::Variable(name) => match variables.get_mut(name) {
+                        Some(var) => {
+                            var.uses += 1;
+                            Ok(Tree::Literal(var.address as i128))
+                        }
                         None => Err(spanned_error!(
                             tok.span.clone(),
                             "variable `{name}` not defined"
