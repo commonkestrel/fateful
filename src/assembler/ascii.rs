@@ -109,7 +109,7 @@ pub fn unescape_str<'a>(s: &'a str) -> Result<AsciiStr, UnescapeError> {
 
         octal.replace_all(&owned, |cap: &Captures<'_>| {
             // The Regex expression guarantees a valid octal.
-            let byte = u8::from_str_radix(&cap[0].strip_prefix('\\').unwrap(), 8).unwrap();
+            let byte = u8::from_str_radix(&cap[0].strip_prefix("\\o").unwrap(), 8).unwrap();
 
             if byte > 0x7F {
                 failure = Some(byte);
@@ -160,8 +160,14 @@ mod tests {
 
     #[test]
     fn unescape() {
-        let test_str = "\\050 hello \\x29 \\t\\n";
-        let unescaped = unescape_str(test_str).unwrap();
+        let test_str = "\\o050 hello \\x29 \\t\\n";
+        let unescaped = match unescape_str(test_str) {
+            Ok(s) => s,
+            Err(err) => {
+                println!("{err:?}");
+                panic!();
+            }
+        };
         assert_eq!(unescaped, "\x28 hello \x29 \t\n\0");
 
         let failure = "\\050 \\";
