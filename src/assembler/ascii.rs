@@ -161,13 +161,7 @@ mod tests {
     #[test]
     fn unescape() {
         let test_str = "\\o050 hello \\x29 \\t\\n";
-        let unescaped = match unescape_str(test_str) {
-            Ok(s) => s,
-            Err(err) => {
-                println!("{err:?}");
-                panic!();
-            }
-        };
+        let unescaped = unescape_str(test_str).unwrap();
         assert_eq!(unescaped, "\x28 hello \x29 \t\n\0");
 
         let failure = "\\050 \\";
