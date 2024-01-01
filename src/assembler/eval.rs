@@ -455,7 +455,7 @@ impl fmt::Display for Tree {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::assembler::ResultScream;
+    use crate::diagnostic::ResultScream;
     use std::ops::RangeInclusive;
 
     fn trim_expr(tokens: &[Token]) -> Result<RangeInclusive<usize>, Diagnostic> {
