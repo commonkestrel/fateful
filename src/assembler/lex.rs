@@ -250,6 +250,7 @@ pub enum TokenInner {
     Punctuation(Punctuation),
 
     #[regex(r"///[^\n]*", TokenInner::doc)]
+    #[regex(r"//\*(?:[^*]|\*[^/]|\*/[^/])*\*//", TokenInner::inline_doc)]
     Doc(String),
 
     #[token("$")]
@@ -352,7 +353,16 @@ impl TokenInner {
             .slice()
             .strip_prefix("///")
             .ok_or_else(|| error!("doc comment does not start with `///`"))?
-            .trim()
+            .to_owned())
+    }
+
+    fn inline_doc(lex: &mut Lexer<TokenInner>) -> Result<String, Diagnostic> {
+        Ok(lex
+            .slice()
+            .strip_prefix("//*")
+            .ok_or_else(|| error!("inline doc comment does not start with `//*`").as_bug())?
+            .strip_suffix("*//")
+            .ok_or_else(|| error!("inline doc comment does not end with `*//`").as_bug())?
             .to_owned())
     }
 }
