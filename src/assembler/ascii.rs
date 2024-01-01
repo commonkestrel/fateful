@@ -1,6 +1,6 @@
 use std::fmt;
 
-use regex::{Captures, Regex};
+use lazy_regex::{regex_replace_all, regex};
 
 #[derive(Clone, PartialEq)]
 pub struct AsciiStr {
@@ -55,7 +55,7 @@ impl PartialEq<&str> for AsciiStr {
 
 impl fmt::Display for AsciiStr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "\"{}\"", unsafe {
+        write!(f, "{}", unsafe {
             std::str::from_utf8_unchecked(&self.inner)
         })
     }
@@ -87,10 +87,8 @@ pub enum UnescapeError {
 pub fn unescape_str<'a>(s: &'a str) -> Result<AsciiStr, UnescapeError> {
     let mut failure = None;
 
-    let hex = Regex::new(r"\\x[0-9a-fA-F]{2}").unwrap();
-    let mut numbered = hex.replace_all(s, |cap: &Captures<'_>| {
-        // The RegEx expression guarantees a valid hex.
-        let byte = u8::from_str_radix(&cap[0].strip_prefix("\\x").unwrap(), 16).unwrap();
+    let mut numbered = regex_replace_all!(r"\\x[0-9a-fA-F]{2}", s, |cap: &str| {
+        let byte = u8::from_str_radix(cap.strip_prefix("\\x").unwrap(), 16).unwrap();
 
         if byte > 0x7F {
             failure = Some(byte);
@@ -104,28 +102,23 @@ pub fn unescape_str<'a>(s: &'a str) -> Result<AsciiStr, UnescapeError> {
     }
 
     let owned = numbered.to_owned();
-    numbered = {
-        let octal = Regex::new(r"\\o[0-7]{3}").unwrap();
+    numbered = regex_replace_all!(r"\\o[0-7]{3}", &owned, |oct: &str| {
+        // The Regex expression guarantees a valid octal.
+        let byte = u8::from_str_radix(oct.strip_prefix("\\o").unwrap(), 8).unwrap();
 
-        octal.replace_all(&owned, |cap: &Captures<'_>| {
-            // The Regex expression guarantees a valid octal.
-            let byte = u8::from_str_radix(&cap[0].strip_prefix("\\o").unwrap(), 8).unwrap();
+        if byte > 0x7F {
+            failure = Some(byte);
+        }
 
-            if byte > 0x7F {
-                failure = Some(byte);
-            }
-
-            unsafe { String::from_utf8_unchecked(vec![byte]) }
-        })
-    };
+        unsafe { String::from_utf8_unchecked(vec![byte]) }
+    });
 
     if let Some(byte) = failure {
         return Err(UnescapeError::InvalidAscii(byte as char));
     }
 
-    let invalid = Regex::new(r"(\\[^nt0rabfv\\])|(\\\z)").unwrap();
-    if let Some(index) = invalid.find(&numbered) {
-        return Err(UnescapeError::UnmatchedBackslash(index.start()));
+    if let Some(invalid) = regex!(r"(\\[^nt0rabfv\\])|(\\\z)").find(&numbered) {
+        return Err(UnescapeError::UnmatchedBackslash(invalid.start()));
     }
 
     let simple = numbered
