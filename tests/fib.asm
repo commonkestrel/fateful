@@ -8,9 +8,6 @@
 @org 0x0000
 @define COUNT 7
 
-@include <arithmetic>
-@include <flow>
-
 _start:
     mv A, COUNT
     call [fib]

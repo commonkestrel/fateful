@@ -1,5 +1,68 @@
-@ifndef FLOW_MACROS
-@define FLOW_MACROS
+// All pre-built macros
+
+@macro push {
+    ; push two registers
+    (%r0:reg, %r1:reg) {
+        push %r0
+        push %r1
+    }
+    ; push three registers
+    (%r0:reg, %r1:reg, %r2:reg) {
+        push %r0
+        push %r1, %r2
+    }
+    ; push four registers
+    (%r0:reg, %r1:reg, %r2:reg, %r3:reg) {
+        push %r0
+        push %r1, %r2, %r3
+    }
+    ; push five registers
+    (%r0:reg, %r1:reg, %r2:reg, %r3:reg, %r4:reg) {
+        push %r0
+        push %r1, %r2, %r3, %r4
+    }
+    ; push six registers
+    (%r0:reg, %r1:reg, %r2:reg, %r3:reg, %r4:reg, %r5:reg) {
+        push %r0
+        push %r1, %r2, %r3, %r4, %r5
+    }
+}
+
+@macro pop {
+    ; pop two registers
+    (%r0:reg, %r1:reg) {
+        pop %r0
+        pop %r1
+    }
+    ; pop three registers
+    (%r0:reg, %r1:reg, %r2:reg) {
+        pop %r0
+        pop %r1, %r2
+    }
+    ; pop four registers
+    (%r0:reg, %r1:reg, %r2:reg, %r3:reg) {
+        pop %r0
+        pop %r1, %r2, %r3
+    }
+    ; pop five registers
+    (%r0:reg, %r1:reg, %r2:reg, %r3:reg, %r4:reg) {
+        pop %r0
+        pop %r1, %r2, %r3, %r4
+    }
+    ; pop six registers
+    (%r0:reg, %r1:reg, %r2:reg, %r3:reg, %r4:reg, %r5:reg) {
+        pop %r0
+        pop %r1, %r2, %r3, %r4, %r5
+    }
+}
+
+@macro pusha () {
+    push A, B, C, D, E, F
+}
+
+@macro popa () {
+    pop F, E, D, C, B, A
+}
 
 @macro jmp {
     () {
@@ -189,4 +252,55 @@
     jmp
 }
 
-@endif
+/// Adds two 16-bit integers
+@macro add16 (%h0:reg, %l0:reg, %h1:reg|imm, %l1:reg|imm) {
+    add %l0, %l1
+    adc %h0, %h1
+}
+
+/// Subtracts two 16-bit integers
+@macro sub16 (%h0:reg, %l0:reg, %h1:reg|imm, %l1:reg|imm) {
+    sub %l0, %l1
+    sbc %h0, %h1
+}
+
+/// Increments the given value
+@macro inc {
+    ; 8-bit
+    (%reg:reg) {
+        add %reg, 1
+    }
+    ; 16-bit
+    (%low:reg, %high:reg) {
+        add %low, 1
+        adc %high, 0
+    }
+}
+
+/// Decrements the given value
+@macro dec (%reg:reg) {
+    sub %reg, 1
+}
+
+/// Bitwise inverts the given byte
+@macro not (%reg:reg) {
+    nand %reg, %reg
+}
+
+/// Bitwise and
+@macro and (%x:reg, %y:reg|imm) {
+    nand %x, %y
+    nand %x, %x
+}
+
+/// Bitwise xor
+@macro xor (%x:reg, %y:reg|imm) {
+    mw F, %y
+    or F, %x
+    nand %x, %y
+    and %x, F
+}
+
+@macro nop () {
+    mv A, A ; shortest instruction with no side effects: 3 clock cycles
+}

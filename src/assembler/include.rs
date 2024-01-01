@@ -1,42 +1,117 @@
+use std::{path::{PathBuf, MAIN_SEPARATOR_STR}, collections::HashMap, sync::Arc, fs};
+
 use super::{
-    lex::{self, TokenStream},
+    lex::{self, TokenStream, Span},
     parse::{Path, PathInner},
-    Errors,
+    Errors, Diagnostic,
 };
-use crate::spanned_error;
+use crate::{spanned_error, note};
 
 use clio::Input;
-use phf::{phf_map, Map};
+use git2::{Repository, build::{RepoBuilder, CheckoutBuilder}};
 
-static BUILT_INS: Map<&'static str, &str> = phf_map! {
-    "macros" => include_str!("../../std/macros.asm"),
-    "arithmetic" => include_str!("../../std/arithmetic.asm"),
-    "flow" => include_str!("../../std/flow.asm"),
-    "util" => include_str!("../../std/util.asm"),
-};
+const CACHE_DIR: &str = "fateful-cache";
 
-pub fn include(path: Path) -> Result<TokenStream, Errors> {
+#[derive(Debug)]
+pub struct Lib {
+    pub name_span: Arc<Span>,
+    source_span: Arc<Span>,
+    source: LibSource,
+}
+
+impl Lib {
+    pub fn new(source: String, name_span: Arc<Span>, source_span: Arc<Span>) -> Lib {
+        Lib {
+            name_span,
+            source_span,
+            source: LibSource::new(source),
+        }
+    }
+
+    fn make_local(&mut self, name: &str) -> Result<(), Diagnostic> {
+        match self.source {
+            LibSource::Local(_) => {},
+            LibSource::Net{ ref url, ref mut path } => {
+                if path.is_none() {
+                    let download_path = CACHE_DIR.to_owned() + MAIN_SEPARATOR_STR + name;
+                    // create lib cache here if it does not exist so that no cache is created if no libraries are downloaded
+                    fs::create_dir_all(CACHE_DIR).map_err(|err| spanned_error!(self.source_span.clone(), "failed to create library cache: {}", err))?;
+                    
+                    let mut checkout = CheckoutBuilder::new();
+                    checkout.force();
+
+                    let pat: &std::path::Path = download_path.as_ref();
+                    if pat.exists() && pat.is_dir() {
+                        fs::remove_dir_all(pat).map_err(|err| spanned_error!(self.name_span.clone(), "unable to remove preexisting directory: {err}"))?;
+                    }
+
+                    Repository::clone(url, &download_path).map_err(|err| spanned_error!(self.source_span.clone(), "unable to clone repository: {}", err.message()))?;
+
+                    *path = Some(download_path);
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl PartialEq<&str> for Lib {
+    fn eq(&self, other: &&str) -> bool {
+        match self.source {
+            LibSource::Local(ref path) => path == other,
+            LibSource::Net{ ref url, path: _ } => url == other,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum LibSource {
+    Net{
+        url: String,
+        path: Option<String>,
+    },
+    Local(String),
+}
+
+impl LibSource {
+    pub fn new(source: String) -> LibSource {
+        if source.starts_with("https://") || source.starts_with("http://") {
+            LibSource::Net{ url: source, path: None }
+        } else {
+            LibSource::Local(source)
+        }
+    }
+}
+
+pub fn include_builtins() -> Result<TokenStream, Errors> {
+    lex::lex_string(Some("builtin macros"), include_str!("macros.asm"))
+}
+
+pub fn include(path: Path, libs: &mut HashMap<String, Lib>) -> Result<TokenStream, Errors> {
     match path.path {
         PathInner::Quoted(s) => lex::lex(
             Input::new(&s.value.to_string())
                 .map_err(|err| vec![spanned_error!(s.span, "unable to read input; {err}")])?,
         ),
         PathInner::Unquoted(p) => {
-            let locator = p
-                .values()
-                .map(|val| val.value.as_str())
-                .collect::<Vec<&str>>()
-                .join("/");
+            let err_span = path.span.clone();
+            let locator = p.first().ok_or_else(|| vec![spanned_error!(err_span, "expected library name")])?;
 
-            BUILT_INS
-                .get_entry(&locator)
-                .ok_or_else(|| {
-                    vec![spanned_error!(
-                        path.span,
-                        "built-in module `{locator}` not recognized"
-                    )]
-                })
-                .and_then(|builtin| lex::lex_string(Some(*builtin.0), *builtin.1))
+            let err_span = path.span.clone();
+            let lib = libs.get_mut(&locator.value).ok_or_else(|| vec![spanned_error!(err_span, "library not imported")])?;
+            lib.make_local(&locator.value).map_err(|err| vec![err])?;
+
+            let path = match &lib.source {
+                LibSource::Local(lib_path) => PathBuf::from(lib_path).join(PathBuf::from_iter(p.values().skip(1).map(|ident| &ident.value))),
+                LibSource::Net{ url: _, path: Some(path) } => PathBuf::from(path).join(PathBuf::from_iter(p.values().skip(1).map(|ident| &ident.value))),
+                _ => unreachable!(),
+            };
+
+            note!("reading imported file: {}", path.display()).emit();
+
+            // we're ok to `unwrap()` the last element, since we already made sure there was at least one element when getting `locator`
+            lex::lex(Input::new(&path).unwrap() )//.map_err(|err| vec![spanned_error!(p.last().unwrap().span.clone(), "unable to read file: {err}")])?)
         }
     }
 }

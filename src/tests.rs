@@ -26,7 +26,7 @@ pub struct TestArgs {
     timeout: humantime::Duration,
 }
 
-pub async fn test_all(args: TestArgs) -> Result<(), ()> {
+pub fn test_all(args: TestArgs) -> Result<(), ()> {
     let mut handles = Vec::new();
 
     for input in args.inputs {
@@ -189,17 +189,7 @@ fn test_file(
     Ok(())
 }
 
-#[test]
-fn std() {
-    if let Err(err) = test_file(
-        Input::new("tests/std.asm").unwrap(),
-        Duration::from_millis(250),
-        stdout(),
-    ) {
-        err.scream();
-    }
-}
-
+#[cfg(test)]
 #[test]
 fn fib() {
     if let Err(err) = test_file(
@@ -211,6 +201,7 @@ fn fib() {
     }
 }
 
+#[cfg(test)]
 #[test]
 fn mem() {
     if let Err(err) = test_file(
@@ -222,6 +213,7 @@ fn mem() {
     }
 }
 
+#[cfg(test)]
 #[test]
 fn comments() {
     if let Err(err) = test_file(
@@ -233,6 +225,7 @@ fn comments() {
     }
 }
 
+#[cfg(test)]
 #[test]
 #[should_panic]
 fn timeout() {
