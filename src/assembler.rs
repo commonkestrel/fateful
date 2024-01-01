@@ -9,13 +9,13 @@ mod include;
 pub mod lex;
 pub mod parse;
 mod token;
-pub use crate::diagnostic::{Diagnostic, OptionalScream, ResultScream};
+pub use crate::diagnostic::Diagnostic;
 use crate::error;
 
 pub mod tests {
     pub use super::{
         assemble,
-        lex::{self, Token, TokenStream},
+        lex,
         parse,
     };
 }
@@ -25,6 +25,7 @@ use std::time::Instant;
 use clap::Args;
 use clio::{Input, Output};
 use colored::Colorize;
+use thiserror::Error;
 
 #[derive(Debug, Args)]
 pub struct AssemblerArgs {
@@ -40,9 +41,23 @@ pub struct AssemblerArgs {
     output: Output,
 }
 
+#[derive(Debug, Error)]
+pub enum AssemblerError {
+    #[error("assembly failed")]
+    Assembly(Errors),
+    #[error(transparent)]
+    IO(#[from] Diagnostic),
+}
+
+impl From<Errors> for AssemblerError {
+    fn from(value: Errors) -> Self {
+        AssemblerError::Assembly(value)
+    }
+}
+
 pub type Errors = Vec<Diagnostic>;
 
-pub async fn assemble(mut args: AssemblerArgs) -> Result<(), Errors> {
+pub fn assemble(mut args: AssemblerArgs) -> Result<(), AssemblerError> {
     let start = Instant::now();
     let input = format!("{}", args.input);
 
@@ -53,10 +68,10 @@ pub async fn assemble(mut args: AssemblerArgs) -> Result<(), Errors> {
     args.output
         .lock()
         .write_all(&assembled)
-        .map_err(|err| vec![error!("failed to write to output: {err}")])?;
+        .map_err(|err| error!("failed to write to output: {err}"))?;
     args.output
         .finish()
-        .map_err(|err| vec![error!("failed to finalize output: {err}")])?;
+        .map_err(|err| error!("failed to finalize output: {err}"))?;
 
     let elapsed = start.elapsed().as_millis();
     let seconds = elapsed / 1000;

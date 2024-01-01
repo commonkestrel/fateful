@@ -1,20 +1,20 @@
 mod emulator;
-use std::sync::OnceLock;
+use std::{sync::OnceLock, process::{ExitCode, Termination}};
 
 use emulator::{EmulatorArgs, EmulatorError};
 mod deploy;
 use deploy::{DeployArgs, DeployError};
 mod assembler;
-use assembler::AssemblerArgs;
+use assembler::{AssemblerArgs, AssemblerError};
 mod tests;
 use tests::TestArgs;
 
 mod diagnostic;
+use diagnostic::ResultScream;
 
 use clap::{Parser, Subcommand};
 use clap_verbosity_flag::{Level, WarnLevel};
 use shadow_rs::shadow;
-use thiserror::Error;
 
 shadow!(build);
 
@@ -41,22 +41,38 @@ enum Command {
     Test(TestArgs),
 }
 
-#[derive(Debug, Error)]
-enum Error {
-    #[error(transparent)]
-    Emulator(#[from] EmulatorError),
-    #[error(transparent)]
-    Deploy(#[from] DeployError),
-    #[error("assembly failed due to previous errors")]
-    Assembler,
-    #[error("one of the tests failed")]
-    TestFailed,
+#[derive(Debug)]
+enum Return {
+    Emulator(EmulatorError),
+    Deploy(DeployError),
+    Assembler(AssemblerError),
+    Test,
+    Ok,
+}
+
+impl Termination for Return {
+    fn report(self) -> ExitCode {
+        match self {
+            Return::Emulator(err) => error!("{err}").emit(),
+            Return::Deploy(err) => error!("{err}").emit(),
+            Return::Test => {},
+            Return::Assembler(AssemblerError::Assembly(errors)) => {
+                for err in errors {
+                    err.emit()
+                }
+
+                error!("assembly failed due to previous errors").emit();
+            }
+            Return::Assembler(AssemblerError::IO(err)) => err.emit(),
+            Return::Ok => return ExitCode::SUCCESS,
+        }
+        ExitCode::FAILURE
+    }
 }
 
 pub static VERBOSITY: OnceLock<Verbosity> = OnceLock::new();
 
-#[async_std::main]
-async fn main() -> Result<(), Error> {
+fn main() -> Return {
     let cli = Args::parse();
 
     let verbose = match cli.verbose.log_level() {
@@ -68,27 +84,26 @@ async fn main() -> Result<(), Error> {
         },
         None => Verbosity::Quiet,
     };
-    VERBOSITY.set(verbose).expect("verbosity should be empty");
+    VERBOSITY.set(verbose).expect_or_scream("verbosity should be empty");
 
     match cli.command {
-        Command::Emulate(args) => emulator::emulate(args).await?,
-        Command::Deploy(args) => deploy::deploy(args).await?,
-        Command::Assemble(args) => match assembler::assemble(args).await {
-            Ok(_) => {}
-            Err(errors) => {
-                for err in errors {
-                    err.emit();
-                }
-
-                error!("assembly failed due to previous errors").emit();
-
-                return Err(Error::Assembler);
-            }
+        Command::Emulate(args) => match async_std::task::block_on(emulator::emulate(args)) {
+            Ok(_) => Return::Ok,
+            Err(err) => Return::Emulator(err),
         },
-        Command::Test(args) => tests::test_all(args).await.map_err(|_| Error::TestFailed)?,
+        Command::Deploy(args) => match deploy::deploy(args) {
+            Ok(_) => Return::Ok,
+            Err(err) => Return::Deploy(err),
+        },
+        Command::Assemble(args) => match assembler::assemble(args) {
+            Ok(_) => Return::Ok,
+            Err(err) => Return::Assembler(err),
+        },
+        Command::Test(args) => match tests::test_all(args) {
+            Ok(_) => Return::Ok,
+            Err(_) => Return::Test,
+        },
     }
-
-    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

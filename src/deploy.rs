@@ -9,8 +9,10 @@ use thiserror::Error;
 pub struct DeployArgs {}
 
 #[derive(Debug, Error)]
-pub enum DeployError {}
+pub enum DeployError {
 
-pub async fn deploy(_args: DeployArgs) -> Result<(), DeployError> {
+}
+
+pub fn deploy(_args: DeployArgs) -> Result<(), DeployError> {
     todo!()
 }
