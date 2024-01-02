@@ -8,7 +8,7 @@ use super::{
 use crate::{spanned_error, note};
 
 use clio::Input;
-use git2::{Repository, build::{RepoBuilder, CheckoutBuilder}};
+use git2::Repository;
 
 const CACHE_DIR: &str = "fateful-cache";
 
@@ -36,13 +36,9 @@ impl Lib {
                     let download_path = CACHE_DIR.to_owned() + MAIN_SEPARATOR_STR + name;
                     // create lib cache here if it does not exist so that no cache is created if no libraries are downloaded
                     fs::create_dir_all(CACHE_DIR).map_err(|err| spanned_error!(self.source_span.clone(), "failed to create library cache: {}", err))?;
-                    
-                    let mut checkout = CheckoutBuilder::new();
-                    checkout.force();
 
-                    let pat: &std::path::Path = download_path.as_ref();
-                    if pat.exists() && pat.is_dir() {
-                        fs::remove_dir_all(pat).map_err(|err| spanned_error!(self.name_span.clone(), "unable to remove preexisting directory: {err}"))?;
+                    if std::path::Path::new(&download_path).is_dir() {
+                        fs::remove_dir_all(&download_path).map_err(|err| spanned_error!(self.name_span.clone(), "unable to remove preexisting directory: {err}"))?;
                     }
 
                     Repository::clone(url, &download_path).map_err(|err| spanned_error!(self.source_span.clone(), "unable to clone repository: {}", err.message()))?;
