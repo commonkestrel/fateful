@@ -1,7 +1,7 @@
 //! Deploys assembled programs to the CPU
 //!
 //! Will be completed once the protocol is solidified.
-//! 
+//!
 //! // TODO: write arduino reciever
 
 use std::env;
@@ -17,10 +17,12 @@ const PORT: &str = "FATEFUL_PORT";
 #[derive(Debug, Args)]
 pub struct DeployArgs {
     input: Input,
-    #[clap(short, long)]
+    #[clap(short = 'P', long)]
     port: Option<String>,
-    #[clap(short, long)]
+    #[clap(short = 'B', long)]
     board: Option<String>,
+    #[clap(short, long)]
+    baud: Option<u32>,
 }
 
 #[derive(Debug, Error)]
@@ -41,27 +43,40 @@ pub fn deploy(mut args: DeployArgs) -> Result<(), DeployError> {
     let board = args.board.or(env::var(BOARD).ok());
     let port_name = match args.port.or(env::var(PORT).ok()) {
         Some(port) => port,
-        None => {
-            match board {
-                Some(b) => find_board(b)?,
-                None => auto_detect().ok_or_else(|| DeployError::PortNotFound)?,
-            }
-        }
+        None => match board {
+            Some(b) => find_board(b)?,
+            None => auto_detect().ok_or_else(|| DeployError::PortNotFound)?,
+        },
     };
 
-    let mut port = serialport::new(port_name, 115200).open()?;
+    let baud = args
+        .baud
+        .or(env::var("FATEFUL_BAUD")
+            .ok()
+            .and_then(|var| var.parse().ok()))
+        .unwrap_or(115200);
+
+    let mut port = serialport::new(port_name, baud).open()?;
 
     let mut data = [0; 1 << 16];
-    args.input.lock().read(&mut data).map_err(|err| DeployError::Input(err))?;
-    port.write_all(&data).map_err(|err| DeployError::Write(err))?;
+    args.input
+        .lock()
+        .read(&mut data)
+        .map_err(|err| DeployError::Input(err))?;
+    port.write_all(&data)
+        .map_err(|err| DeployError::Write(err))?;
 
     Ok(())
 }
 
 fn find_board(board: String) -> Result<String, DeployError> {
     match board.as_str() {
-        "uno" | "nano" => Uno::find_port(&serialport::available_ports()?).ok_or(DeployError::PortNotFound),
-        "micro" => Micro::find_port(&serialport::available_ports()?).ok_or(DeployError::PortNotFound),
+        "uno" | "nano" => {
+            Uno::find_port(&serialport::available_ports()?).ok_or(DeployError::PortNotFound)
+        }
+        "micro" => {
+            Micro::find_port(&serialport::available_ports()?).ok_or(DeployError::PortNotFound)
+        }
         _ => Err(DeployError::InvalidBoard(board)),
     }
 }
@@ -72,8 +87,7 @@ fn auto_detect() -> Option<String> {
         Err(_) => return None,
     };
 
-    Uno::find_port(&devices)
-        .or_else(|| Micro::find_port(&devices))
+    Uno::find_port(&devices).or_else(|| Micro::find_port(&devices))
 }
 
 fn find_vid_pid(devices: &[SerialPortInfo], vid_pid: &[(u16, u16)]) -> Option<String> {
@@ -100,12 +114,15 @@ impl Board for Uno {
     const DISPLAY_NAME: &'static str = "Arduino Uno";
 
     fn find_port(devices: &[SerialPortInfo]) -> Option<String> {
-        find_vid_pid(devices, &[
-            (0x2341, 0x0043),
-            (0x2341, 0x0001),
-            (0x2A03, 0x0043),
-            (0x2341, 0x0243),
-        ])
+        find_vid_pid(
+            devices,
+            &[
+                (0x2341, 0x0043),
+                (0x2341, 0x0001),
+                (0x2A03, 0x0043),
+                (0x2341, 0x0243),
+            ],
+        )
     }
 }
 
@@ -115,13 +132,16 @@ impl Board for Micro {
     const DISPLAY_NAME: &'static str = "Arduino Micro";
 
     fn find_port(devices: &[SerialPortInfo]) -> Option<String> {
-        find_vid_pid(devices, &[
-            (0x2341, 0x0037),
-            (0x2341, 0x8037),
-            (0x2A03, 0x0037),
-            (0x2A03, 0x8037),
-            (0x2341, 0x0237),
-            (0x2341, 0x8237),
-        ])
+        find_vid_pid(
+            devices,
+            &[
+                (0x2341, 0x0037),
+                (0x2341, 0x8037),
+                (0x2A03, 0x0037),
+                (0x2A03, 0x8037),
+                (0x2341, 0x0237),
+                (0x2341, 0x8237),
+            ],
+        )
     }
 }
