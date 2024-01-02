@@ -13,11 +13,7 @@ pub use crate::diagnostic::Diagnostic;
 use crate::error;
 
 pub mod tests {
-    pub use super::{
-        assemble,
-        lex,
-        parse,
-    };
+    pub use super::{assemble, lex, parse};
 }
 
 use std::time::Instant;

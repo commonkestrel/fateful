@@ -1,5 +1,8 @@
 mod emulator;
-use std::{sync::OnceLock, process::{ExitCode, Termination}};
+use std::{
+    process::{ExitCode, Termination},
+    sync::OnceLock,
+};
 
 use emulator::{EmulatorArgs, EmulatorError};
 mod deploy;
@@ -55,7 +58,7 @@ impl Termination for Return {
         match self {
             Return::Emulator(err) => error!("{err}").emit(),
             Return::Deploy(err) => error!("{err}").emit(),
-            Return::Test => {},
+            Return::Test => {}
             Return::Assembler(AssemblerError::Assembly(errors)) => {
                 for err in errors {
                     err.emit()
@@ -84,7 +87,9 @@ fn main() -> Return {
         },
         None => Verbosity::Quiet,
     };
-    VERBOSITY.set(verbose).expect_or_scream("verbosity should be empty");
+    VERBOSITY
+        .set(verbose)
+        .expect_or_scream("verbosity should be empty");
 
     match cli.command {
         Command::Emulate(args) => match async_std::task::block_on(emulator::emulate(args)) {

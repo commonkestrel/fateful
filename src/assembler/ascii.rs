@@ -1,6 +1,6 @@
 use std::fmt;
 
-use lazy_regex::{regex_replace_all, regex};
+use lazy_regex::{regex, regex_replace_all};
 
 #[derive(Clone, PartialEq)]
 pub struct AsciiStr {

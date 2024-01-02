@@ -7,13 +7,13 @@
 
 use super::{
     eval, include,
+    include::Lib,
     lex::{self, Delimeter, PreProc, Punctuation, Span, Token, TokenInner, TokenStream},
     token::{self, ClosedBracket, OpenBracket, Register, Variable},
     token::{
         ClosedBrace, ClosedParen, Ident, Immediate, LitString, MacroVariable, NewLine, OpenBrace,
         OpenParen, Ty,
     },
-    include::Lib,
     Errors,
 };
 
@@ -451,8 +451,8 @@ pub fn parse(mut stream: TokenStream) -> Result<ParseStream, Errors> {
         Ok(mut macros) => {
             macros.append(&mut stream);
             macros
-        },
-        Err(mut errs) =>{
+        }
+        Err(mut errs) => {
             errors.append(&mut errs);
             stream
         }
@@ -764,7 +764,9 @@ fn expand_preproc(peek: Token, ctx: &mut Context) -> Result<(), Errors> {
         TI::Doc(ref doc_str) => {
             ctx.cursor.position += 1;
 
-            if let Some((_whole, name, source)) = regex_captures!(r"(\s*[._a-zA-Z][._a-zA-Z0-9]*\s*)=(.*)", doc_str) {
+            if let Some((_whole, name, source)) =
+                regex_captures!(r"(\s*[._a-zA-Z][._a-zA-Z0-9]*\s*)=(.*)", doc_str)
+            {
                 let comment_start = 3 + peek.span.start();
                 let name_start = comment_start + (name.len() - name.trim_start().len());
                 let name_end = comment_start + name.trim_end().len();
@@ -773,15 +775,29 @@ fn expand_preproc(peek: Token, ctx: &mut Context) -> Result<(), Errors> {
                     ..(*peek.span).clone()
                 });
 
-                let source_start = comment_start + name.len() + 1 + (source.len() - source.trim_start().len());
+                let source_start =
+                    comment_start + name.len() + 1 + (source.len() - source.trim_start().len());
                 let source_end = source_start + source.trim_end().len() - 1;
 
-                if let Some(prev) = ctx.libs.insert(name.trim().to_owned(), Lib::new(source.trim().to_owned(), name_span.clone(), Span {
-                    range: source_start..source_end,
-                    ..(*peek.span).clone()
-                }.into())) {
+                if let Some(prev) = ctx.libs.insert(
+                    name.trim().to_owned(),
+                    Lib::new(
+                        source.trim().to_owned(),
+                        name_span.clone(),
+                        Span {
+                            range: source_start..source_end,
+                            ..(*peek.span).clone()
+                        }
+                        .into(),
+                    ),
+                ) {
                     if prev != source {
-                        Diagnostic::referencing_warning(name_span, "import redefined", Reference::new(prev.name_span, "previous defintion here")).emit();
+                        Diagnostic::referencing_warning(
+                            name_span,
+                            "import redefined",
+                            Reference::new(prev.name_span, "previous defintion here"),
+                        )
+                        .emit();
                     }
                 }
             }
