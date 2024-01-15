@@ -46,7 +46,7 @@
 //! ```
 
 use super::{
-    assemble::Usable,
+    generator::Usable,
     lex::{Delimeter, Ident, Punctuation, Span, Token, TokenInner, TokenStream},
     parse::{Bracketed, Parenthesized},
     token::Immediate,
