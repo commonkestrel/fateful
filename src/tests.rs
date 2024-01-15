@@ -2,7 +2,7 @@ use clap::Args;
 use clio::Input;
 
 use crate::assembler::tests::{
-    assemble,
+    generator,
     lex::{self, Token, TokenInner},
     parse,
 };
@@ -170,7 +170,7 @@ fn test_file(
     }
 
     let parsed = parse::parse(lexed).map_err(|errors| emit_errors(errors, &mut out))?;
-    let assembled = assemble::assemble(parsed).map_err(|errors| emit_errors(errors, &mut out))?;
+    let assembled = generator::generate(parsed).map_err(|errors| emit_errors(errors, &mut out))?;
 
     if run {
         let bank = test_emulate(assembled.into(), timeout)

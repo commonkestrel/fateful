@@ -1054,7 +1054,7 @@ impl ExpSeg {
     }
 }
 
-pub fn assemble(ctx: ParseStream) -> Result<[u8; 1 << 16], Errors> {
+pub fn generate(ctx: ParseStream) -> Result<[u8; 1 << 16], Errors> {
     let data = assemble_data(ctx.data)?;
     let expanded = expand_macros(ctx.code, ctx.macros)?;
     compile(expanded, data)

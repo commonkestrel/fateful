@@ -3,7 +3,7 @@
 //! Will be completed once I actually fix the assembler.
 
 mod ascii;
-pub mod assemble;
+pub mod generator;
 mod eval;
 mod include;
 pub mod lex;
@@ -13,7 +13,7 @@ pub use crate::diagnostic::Diagnostic;
 use crate::error;
 
 pub mod tests {
-    pub use super::{assemble, lex, parse};
+    pub use super::{generator, lex, parse};
 }
 
 use std::time::Instant;
@@ -59,7 +59,7 @@ pub fn assemble(mut args: AssemblerArgs) -> Result<(), AssemblerError> {
 
     let lexed = lex::lex(args.input)?;
     let parsed = parse::parse(lexed)?;
-    let assembled = assemble::assemble(parsed)?;
+    let assembled = generator::generate(parsed)?;
 
     args.output
         .lock()
