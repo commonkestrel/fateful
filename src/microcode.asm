@@ -107,11 +107,11 @@ lda:
     thl | rbi | cr | pci
 
 lpm:
+    li
 .reg:
     thl | rbo
     sa | rsb | rbo | cr | pci
 .imm:
-    li
     pci
     po | ahi | pci
     po | ali
