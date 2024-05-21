@@ -28,7 +28,7 @@ adc:
 .both:
     ao | aom | rsb | rbi | cr | pci
 
-sbc:
+sbb:
     li
     rsb | rbo | aom | aol | pci
 .reg:
