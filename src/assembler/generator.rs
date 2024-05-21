@@ -26,7 +26,7 @@ const IMMEDIATE_MASK: u8 = 0b0000_1000;
 const ADD: u8 = 0x00;
 const SUB: u8 = 0x10;
 const ADC: u8 = 0x20;
-const SBC: u8 = 0x30;
+const SBB: u8 = 0x30;
 const NAND: u8 = 0x40;
 const OR: u8 = 0x50;
 const CMP: u8 = 0x60;
@@ -50,7 +50,7 @@ enum Instruction {
     Add(Register, RegImm),
     Sub(Register, RegImm),
     Adc(Register, RegImm),
-    Sbc(Register, RegImm),
+    Sbb(Register, RegImm),
     Nand(Register, RegImm),
     Or(Register, RegImm),
     Cmp(Register, RegImm),
@@ -74,7 +74,7 @@ impl Instruction {
             Instruction::Add(_, _) => 2,
             Instruction::Sub(_, _) => 2,
             Instruction::Adc(_, _) => 2,
-            Instruction::Sbc(_, _) => 2,
+            Instruction::Sbb(_, _) => 2,
             Instruction::Nand(_, _) => 2,
             Instruction::Or(_, _) => 2,
             Instruction::Cmp(_, _) => 2,
@@ -116,8 +116,8 @@ impl Instruction {
             Instruction::Adc(reg, regimm) => {
                 Instruction::compile_double(ADC, reg, regimm, pc, parent, labels, data)
             }
-            Instruction::Sbc(reg, regimm) => {
-                Instruction::compile_double(SBC, reg, regimm, pc, parent, labels, data)
+            Instruction::Sbb(reg, regimm) => {
+                Instruction::compile_double(SBB, reg, regimm, pc, parent, labels, data)
             }
             Instruction::Nand(reg, regimm) => {
                 Instruction::compile_double(NAND, reg, regimm, pc, parent, labels, data)
@@ -396,7 +396,7 @@ impl TryFrom<Inst> for Instruction {
                 let (reg, regimm) = pull_double(args)?;
                 Ok(Instruction::Adc(reg, regimm))
             }
-            "sbc" => {
+            "sbb" => {
                 if args.len() != 2 {
                     return Err(spanned_error!(
                         value.name.span,
@@ -406,7 +406,7 @@ impl TryFrom<Inst> for Instruction {
                 }
 
                 let (reg, regimm) = pull_double(args)?;
-                Ok(Instruction::Sbc(reg, regimm))
+                Ok(Instruction::Sbb(reg, regimm))
             }
             "nand" => {
                 if args.len() != 2 {

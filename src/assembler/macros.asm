@@ -252,6 +252,12 @@
     jmp
 }
 
+/// Moves a 16 bit immediate into the provided registers
+@macro mv16 (%high:reg, %low:reg, %imm:imm) {
+    mv %high, (%imm >> 8)
+    mv %low, (%imm & 0xFF)
+}
+
 /// Adds two 16-bit integers
 @macro add16 (%h0:reg, %l0:reg, %h1:reg|imm, %l1:reg|imm) {
     add %l0, %l1
@@ -261,7 +267,7 @@
 /// Subtracts two 16-bit integers
 @macro sub16 (%h0:reg, %l0:reg, %h1:reg|imm, %l1:reg|imm) {
     sub %l0, %l1
-    sbc %h0, %h1
+    sbb %h0, %h1
 }
 
 /// Increments the given value
