@@ -629,8 +629,8 @@ impl State {
                     },
                     None => 0x00,
                 },
-                0xFFFD => (self.timer >> 8) as u8,
-                0xFFFE => (self.timer & 0xFF) as u8,
+                0xFFFD => (self.pc >> 8) as u8,
+                0xFFFE => (self.pc & 0xFF) as u8,
                 0xFFFF => self.sreg.bits(),
             }
         } else if cw.contains(ControlWord::PO) {
@@ -674,10 +674,10 @@ impl State {
                     None => {}
                 },
                 0xFFFD => {
-                    self.timer = (self.timer & 0x00FF) | ((bus as u16) << 8);
+                    self.pc = (self.pc & 0xFF00) | (bus as u16);
                 }
                 0xFFFE => {
-                    self.timer = (self.timer & 0xFF00) | (bus as u16);
+                    self.pc = (self.pc & 0x00FF) | ((bus as u16) << 8);
                 }
                 0xFFFF => {
                     self.sreg = SReg::from_bits_retain(bus);
@@ -1567,6 +1567,12 @@ async fn variadic_arg(
                             )
                             .map_err(|err| EmulatorError::StdOut(err))?;
                             return Ok(());
+                        } else if p == 0xFFFE || p == 0xFFFD {
+                            writeln!(
+                                ewriter,
+                                "INVALID ARGUMENT: the stack pointer cannot be overwritten"
+                            )
+                            .map_err(|err| EmulatorError::StdOut(err))?;
                         } else {
                             ports.push((p - 0xFFC0) as u8)
                         }
@@ -1614,6 +1620,12 @@ async fn variadic_arg(
                             )
                             .map_err(|err| EmulatorError::StdOut(err))?;
                             return Ok(());
+                        } else if p == 0xFFFE || p == 0xFFFD {
+                            writeln!(
+                                ewriter,
+                                "INVALID ARGUMENT: the stack pointer cannot be overwritten"
+                            )
+                            .map_err(|err| EmulatorError::StdOut(err))?;
                         } else {
                             ports.push((p - 0xFFC0) as u8)
                         }

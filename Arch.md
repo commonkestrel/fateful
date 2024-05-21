@@ -39,7 +39,7 @@ ALU operations based on these opcodes are shown below:
 |  `1`  |  `0`  |  `0`  |  `0`  |   `ADD`   |
 |  `1`  |  `0`  |  `0`  |  `1`  |   `SUB`   |
 |  `1`  |  `0`  |  `1`  |  `0`  |   `ADC`   |
-|  `1`  |  `0`  |  `1`  |  `0`  |   `SBC`   |
+|  `1`  |  `0`  |  `1`  |  `0`  |   `SBB`   |
 |  `1`  |  `1`  |  `0`  |  `0`  |  `NAND`   |
 |  `1`  |  `1`  |  `0`  |  `1`  |    `OR`   |
 
@@ -80,7 +80,7 @@ These operations are listed here:
 - `ALI` (Address Low In): Loads the contents of the bus into the low byte of the Address Register.
 - `AHI` (Address High In): Loads the contents of the bus into the high byte of the Address Register.
 - `LSP` (Load Stack Pointer): Loads the Stack Pointer into the Address Register.
-- `LPM` (Load Program Memory): Loads the
+- `LPM` (Load Program Memory): Loads the byte indexed by the Program Counter onto the bus.
 - `SH` (Set Halt): Sets the Halt (`H`) bit in the Status Register
 
 ## Memory
@@ -95,9 +95,18 @@ but there are a few peripherals that are required:
 - `0xFFFF` Status Register: This register is written to and read by the CPU without addressing,\
   but programs can access it through memory operations.\
   The contents of the Status Register are explained more in [Status Register](#status-register).
+- `0xFFFE` Stack Pointer High: The top 8 bits of the stack pointer.
+- `0xFFFD` Stack Pointer Low: The lower 8 bits of the stack pointer.
 
 ## Status Register
 
 | $7$ | $6$ | $5$ | $4$ | $3$ | $2$ | $1$ | $1$ |
 |-----|-----|-----|-----|-----|-----|-----|-----|
 | `H` |     |     | `G` | `E` | `L` | `C` | `Z` |
+
+- `H` (Halt)
+- `G` (Greater Than)
+- `E` (Equal)
+- `L` (Less Than)
+- `C` (Carry)
+- `Z` (Zero)
