@@ -214,7 +214,6 @@ pub enum TokenInner {
     #[regex(r"@[_a-zA-Z][_a-zA-Z0-9]*", Ident::pre_proc)]
     #[regex(r"%[_a-zA-Z][_a-zA-Z0-9]*", Ident::macro_variable)]
     #[regex(r"\$[_a-zA-Z][_a-zA-Z0-9]*", Ident::variable)]
-    #[regex(r"()", Ident::punc)]
     Ident(Ident),
 
     #[token("(", Delimeter::open_paren)]
@@ -422,7 +421,7 @@ impl Ident {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Register {
     /// GP register A.
     A = 0,
@@ -432,7 +431,7 @@ pub enum Register {
     C = 2,
     /// GP register D.
     D = 3,
-    /// GP register Z (disposable).
+    /// GP register E.
     E = 4,
     /// Status register
     F = 5,

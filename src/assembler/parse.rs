@@ -1328,17 +1328,29 @@ impl MacroDef {
                         item = None;
                     }
                     None => {
-                        let next = if let TokenInner::Ident(lex::Ident::MacroVariable(ref var)) =
-                            tok.inner
-                        {
-                            (*parameters.get(var).ok_or_else(|| {
-                                spanned_error!(tok.span, "macro variable not recognized")
-                            })?)
-                            .clone()
-                        } else {
-                            cursor.position -= 1;
-                            cursor.parse()?
+                        let mut next = match tok.inner {
+                            TokenInner::Ident(lex::Ident::MacroVariable(ref var)) => {
+                                (*parameters.get(var).ok_or_else(|| {
+                                    spanned_error!(tok.span, "macro variable not recognized")
+                                })?)
+                                .clone()
+                            }
+                            _ => {
+                                cursor.position -= 1;
+                                cursor.parse()?
+                            }
                         };
+
+                        match next {
+                            Argument::Expr(ref mut parenthesized) => {
+                                Self::replace_stream(&mut parenthesized.inner, parameters)?;
+                            }
+                            Argument::Addr(ref mut bracketed) => {
+                                Self::replace_stream(&mut bracketed.inner, parameters)?;
+                            }
+                            _ => {}
+                        }
+
                         item = Some(next);
                     }
                 },
@@ -1349,6 +1361,62 @@ impl MacroDef {
             list: arguments,
             last: item,
         })
+    }
+
+    fn replace_stream(
+        stream: &mut TokenStream,
+        parameters: &HashMap<String, &Argument>,
+    ) -> Result<(), Diagnostic> {
+        for i in 0..stream.len() {
+            if let TokenInner::Ident(lex::Ident::MacroVariable(ref var)) = stream[i].inner {
+                match *parameters.get(var).ok_or_else(|| {
+                    spanned_error!(stream[i].span.clone(), "macro variable not recognized")
+                })? {
+                    Argument::Str(arg) => {
+                        stream[i].inner = TokenInner::String(arg.value.clone());
+                    }
+                    Argument::Reg(reg) => {
+                        stream[i].inner = TokenInner::Ident(lex::Ident::Register(reg.inner));
+                    }
+                    Argument::Immediate(imm) => {
+                        stream[i].inner = TokenInner::Immediate(imm.value);
+                    }
+                    Argument::Ident(ident) => {
+                        stream[i].inner = TokenInner::Ident(lex::Ident::Ident(ident.value.clone()));
+                    }
+                    Argument::Expr(expr) => {
+                        stream.splice(
+                            i..=i,
+                            std::iter::once(Token {
+                                span: expr.open.span.clone(),
+                                inner: TokenInner::Delimeter(Delimeter::OpenParen),
+                            })
+                            .chain(expr.inner.clone())
+                            .chain(std::iter::once(Token {
+                                span: expr.close.span.clone(),
+                                inner: TokenInner::Delimeter(Delimeter::ClosedParen),
+                            })),
+                        );
+                    }
+                    Argument::Addr(addr) => {
+                        stream.splice(
+                            i..=i,
+                            std::iter::once(Token {
+                                span: addr.open.span.clone(),
+                                inner: TokenInner::Delimeter(Delimeter::OpenBracket),
+                            })
+                            .chain(addr.inner.clone())
+                            .chain(std::iter::once(Token {
+                                span: addr.close.span.clone(),
+                                inner: TokenInner::Delimeter(Delimeter::ClosedBracket),
+                            })),
+                        );
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
     fn parse_inputs(cursor: &mut Cursor) -> Result<Vec<Parameter>, Diagnostic> {
