@@ -3,8 +3,8 @@
 //! Will be completed once I actually fix the assembler.
 
 mod ascii;
-pub mod generator;
 mod eval;
+pub mod generator;
 mod include;
 pub mod lex;
 pub mod parse;
