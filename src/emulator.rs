@@ -581,14 +581,6 @@ impl State {
 
         // rising edge
 
-        if cw.contains(ControlWord::JNZ) {
-            if !self.sreg.contains(SReg::Z) {
-                self.pc = ((self.bank.h as u16) << 8) | (self.bank.l as u16);
-            } else if !cw.contains(ControlWord::PCI) {
-                self.pc = self.pc.wrapping_add(1);
-            }
-        }
-
         if cw.contains(ControlWord::PCI) {
             self.pc = self.pc.wrapping_add(1);
         }
@@ -737,6 +729,14 @@ impl State {
                 cw.contains(ControlWord::AOM),
                 cw.contains(ControlWord::AOH),
             )
+        }
+
+        if cw.contains(ControlWord::JNZ) {
+            if !self.sreg.contains(SReg::Z) {
+                self.pc = ((self.bank.h as u16) << 8) | (self.bank.l as u16);
+            } else if !cw.contains(ControlWord::PCI) {
+                self.pc = self.pc.wrapping_add(1);
+            }
         }
 
         // falling edge
