@@ -80,14 +80,14 @@ These operations are listed here:
 - `ALI` (Address Low In): Loads the contents of the bus into the low byte of the Address Register.
 - `AHI` (Address High In): Loads the contents of the bus into the high byte of the Address Register.
 - `LSP` (Load Stack Pointer): Loads the Stack Pointer into the Address Register.
-- `LPM` (Load Program Memory): Loads the byte indexed by the Program Counter onto the bus.
-- `SH` (Set Halt): Sets the Halt (`H`) bit in the Status Register
+- `LPM` (Load Program Memory): Loads the byte indexed by the Address Register onto the bus.
+- `SH` (Set Halt): Sets the Halt (`H`) bit in the Status Register.
 
 ## Memory
 
 There are 64kb of accessable RAM on the board,
-with the top 64 addresses (`0xFFC0` - `0xFFFF`) being reserved for memory mapped peripherals.
-The stack starts at `0xFFBF` and grows downward.
+with the top 32 addresses (`0xFFE0` - `0xFFFF`) being reserved for memory mapped peripherals.
+The stack starts at `0xFFDF` and grows downward.
 
 There are 64 addresses for memory mapped I/O to allow for expansion,
 but there are a few peripherals that are required:
@@ -100,7 +100,7 @@ but there are a few peripherals that are required:
 
 ## Status Register
 
-| $7$ | $6$ | $5$ | $4$ | $3$ | $2$ | $1$ | $1$ |
+| $7$ | $6$ | $5$ | $4$ | $3$ | $2$ | $1$ | $0$ |
 |-----|-----|-----|-----|-----|-----|-----|-----|
 | `H` |     |     | `G` | `E` | `L` | `C` | `Z` |
 
