@@ -1128,7 +1128,7 @@ fn help() {
         GET <reg>           : Gets the value in the register `reg`\n\
         PEEK <addr>         : Gets the value at the memory address `addr`\n\
         POKE <addr>, <val>  : Sets the value at the memory address `addr` to `val`\n\
-        RUN <speed>         : Starts running the CPU at the specified `speed` (in hertz)\
+        RUN <speed>         : Starts running the CPU at the specified `speed` (in hertz)\n\
         LOAD <path>, <port> : Loads the library at the given path as a peripheral.\n\
         DROP <port>         : Disconnects the peripheral on the given port, unloading the module.\n\
         DUMP                : Dumps the current machine state\n\
