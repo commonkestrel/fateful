@@ -80,13 +80,13 @@ fn emit_errors(errors: Vec<Diagnostic>, mut out: impl std::io::Write) -> Diagnos
 }
 
 #[inline]
-fn bank_assert(bank: u8, expected: Option<u8>) -> Result<(), Diagnostic> {
+fn bank_assert(bank: u8, name: &str, expected: Option<u8>) -> Result<(), Diagnostic> {
     if let Some(reg) = expected {
         if bank == reg {
             Ok(())
         } else {
             Err(error!(
-                "register side does not equal expected value: {bank} != {reg}"
+                "register {name} does not equal expected value: {bank} != {reg}"
             ))
         }
     } else {
@@ -176,14 +176,14 @@ fn test_file(
         let bank = test_emulate(assembled.into(), timeout)
             .map_err(|_| error!("emulator exceeded timeout"))?;
 
-        bank_assert(bank.a, a)?;
-        bank_assert(bank.b, b)?;
-        bank_assert(bank.c, c)?;
-        bank_assert(bank.d, d)?;
-        bank_assert(bank.e, e)?;
-        bank_assert(bank.f, f)?;
-        bank_assert(bank.h, h)?;
-        bank_assert(bank.l, l)?;
+        bank_assert(bank.a, "A", a)?;
+        bank_assert(bank.b, "B", b)?;
+        bank_assert(bank.c, "C", c)?;
+        bank_assert(bank.d, "D", d)?;
+        bank_assert(bank.e, "E", e)?;
+        bank_assert(bank.f, "F", f)?;
+        bank_assert(bank.h, "H", h)?;
+        bank_assert(bank.l, "L", l)?;
     }
 
     Ok(())
@@ -194,6 +194,18 @@ fn test_file(
 fn fib() {
     if let Err(err) = test_file(
         Input::new("tests/fib.asm").unwrap(),
+        Duration::from_millis(250),
+        stdout(),
+    ) {
+        err.scream();
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn arithmetic() {
+    if let Err(err) = test_file(
+        Input::new("tests/arithmetic.asm").unwrap(),
         Duration::from_millis(250),
         stdout(),
     ) {
