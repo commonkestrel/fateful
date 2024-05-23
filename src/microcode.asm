@@ -66,15 +66,16 @@ cmp:
 .imm:
     po | aoh
 .both:
-    ao | aol | cr | pci
+    aol | cr | pci
 
 mv:
     li
-    pci
 .reg:
-    sr | cr | pci
+    sr | pci
 .imm:
-    rsb | rbi | po | cr | pci
+    rsb | rbi | po | pci
+.both:
+    pci | cr
 
 ld:
     li
@@ -82,9 +83,8 @@ ld:
     thl | rbo
     la | rsb | rbi | cr | pci
 .imm:
-    pci
     ahi | po | pci
-    ali | po
+    ali | po | pci
     la | rsb | rbi | cr | pci
 
 st:
@@ -93,17 +93,15 @@ st:
     thl | rbo
     sa | rsb | rbo | cr | pci
 .imm:
-    pci
     ahi | po | pci
-    ali | po
+    ali | po | pci
     sa | rsb | rbo | cr | pci
 
 lda:
 .imm:
     li
-    pci
     po | ahi | pci
-    po | ali
+    po | ali | pci
     thl | rbi | cr | pci
 
 lpm:
@@ -112,9 +110,8 @@ lpm:
     thl | rbo
     sa | rsb | rbo | cr | pci
 .imm:
-    pci
     po | ahi | pci
-    po | ali
+    po | ali | pci
     lpm | rsb | rbi | cr | pci
 
 
@@ -142,8 +139,7 @@ jnz:
     rsb | rbo | aom | aol
     aom | jnz | cr
 .imm:
-    pci
-    po | aom | aol
+    po | aom | aol | pci
     aom | jnz | cr
 
 halt:
