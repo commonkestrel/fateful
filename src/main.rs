@@ -35,10 +35,12 @@ struct Args {
 #[derive(Debug, Subcommand)]
 enum Command {
     /// Run the F8ful emulator
+    #[clap(alias = "emu")]
     Emulate(EmulatorArgs),
     /// Deploy a program to a connected CPU
     Deploy(DeployArgs),
     /// Assemble a Fate program
+    #[clap(alias = "asm")]
     Assemble(AssemblerArgs),
     /// Quickly test Fate assembly programs
     Test(TestArgs),
