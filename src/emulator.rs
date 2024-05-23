@@ -581,6 +581,18 @@ impl State {
 
         // rising edge
 
+        if cw.contains(ControlWord::JNZ) {
+            if !self.sreg.contains(SReg::Z) {
+                self.pc = ((self.bank.h as u16) << 8) | (self.bank.l as u16);
+            } else if !cw.contains(ControlWord::PCI) {
+                self.pc = self.pc.wrapping_add(1);
+            }
+        }
+
+        if cw.contains(ControlWord::PCI) {
+            self.pc = self.pc.wrapping_add(1);
+        }
+
         let program_byte = self.program[self.pc as usize];
 
         if cw.contains(ControlWord::LI) {
@@ -749,22 +761,11 @@ impl State {
 
         self.timer = self.timer.wrapping_add(1);
 
-        if cw.contains(ControlWord::JNZ) {
-            if !self.sreg.contains(SReg::Z) {
-                self.pc = ((self.bank.h as u16) << 8) | (self.bank.l as u16);
-            } else if !cw.contains(ControlWord::PCI) {
-                self.pc = self.pc.wrapping_add(1);
-            }
-        }
 
         if cw.contains(ControlWord::CR) {
             self.ctrl.clock = 0;
         } else {
             self.ctrl.clock = self.ctrl.clock.wrapping_add(1);
-        }
-
-        if cw.contains(ControlWord::PCI) {
-            self.pc = self.pc.wrapping_add(1);
         }
 
         false
