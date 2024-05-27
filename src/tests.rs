@@ -36,35 +36,36 @@ pub fn test_all(args: TestArgs) -> Result<(), ()> {
             name.clone(),
             thread::spawn(move || {
                 let mut output = Vec::new();
-                let name = format!("{input}");
 
-                match test_file(input, args.timeout.into(), &mut output) {
-                    Ok(_) => {
-                        println!("{name} - {}", "success".green());
-                        Ok(())
-                    }
-                    Err(err) => {
-                        writeln!(output, "{err}").unwrap();
-                        println!("{name} - {}", "failure".red());
-                        Err(output)
-                    }
-                }
+                test_file(input, args.timeout.into(), &mut output).map_err(|err| {
+                    writeln!(output, "{err}").unwrap();
+                    output
+                })
             }),
         ));
     }
 
-    for handle in handles {
-        handle
-            .1
-            .join()
-            .expect("one of the test threads panicked")
-            .map_err(|err| {
-                println!("\n---- {} stdout ----", handle.0);
-                stdout().write(&err).unwrap();
-                println!();
+    let mut joined = Vec::new();
 
-                ()
-            })?;
+    for handle in handles {
+        joined.push((handle.0, handle.1.join().expect("one of the test threads panicked")));
+    }
+
+    for handle in joined.iter() {
+        if let Err(ref err) = handle.1 {
+            println!("---- {} stdout ----", handle.0);
+            stdout().write(err).unwrap();
+            println!();
+        }
+    }
+
+    for handle in joined {
+        let status = match handle.1 {
+            Ok(_) => "success".green(),
+            Err(_) => "failure".red(),
+        };
+
+        println!("{} - {status}", handle.0);
     }
 
     Ok(())
