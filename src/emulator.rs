@@ -312,9 +312,21 @@ impl Alu {
     fn execute(&mut self, sreg: &mut SReg, bus: u8, aol: bool, aom: bool, aoh: bool) {
         match (aoh, aom, aol) {
             (false, false, true) => match self.primary.cmp(&self.secondary) {
-                Ordering::Less => sreg.insert(SReg::L),
-                Ordering::Equal => sreg.insert(SReg::E),
-                Ordering::Greater => sreg.insert(SReg::G),
+                Ordering::Less => {
+                    sreg.insert(SReg::L);
+                    sreg.remove(SReg::E);
+                    sreg.remove(SReg::G);
+                },
+                Ordering::Equal => {
+                    sreg.remove(SReg::L);
+                    sreg.insert(SReg::E);
+                    sreg.remove(SReg::G);
+                },
+                Ordering::Greater => {
+                    sreg.remove(SReg::L);
+                    sreg.remove(SReg::E);
+                    sreg.insert(SReg::G);
+                },
             },
             (false, true, false) => sreg.set(SReg::Z, self.primary == 0),
             (false, true, true) => self.primary = bus,
