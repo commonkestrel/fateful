@@ -3,6 +3,8 @@
 @define SCREEN_HEIGHT 25
 @define BOX_WIDTH (SCREEN_WIDTH - 2)
 @define BOX_HEIGHT (SCREEN_HEIGHT - 2)
+@define HELLO_X 3
+@define HELLO_Y 3
 
 @define TR_CORNER 0xBB 
 @define BR_CORNER 0xBC
@@ -22,6 +24,7 @@ _start:
     call [draw_bottom]
     call [draw_left]
     call [draw_right]
+    call [draw_hello]
     halt
 
 draw_top:
@@ -56,6 +59,28 @@ draw_left:
 draw_right:
     ret
 
+draw_hello:
+    mv A, 0 ; character index stored in `A`
+.loop:
+    mv B, A
+    add B, HELLO_X
+
+    lda [hello_str]
+    add16 H, L, 0, A
+    lpm C
+    jz C, [.return]
+
+    push A ; store X coordinate
+    push B, HELLO_Y, C ; pass X, Y, and character
+    call [draw_character]
+
+    pop A ; get X coordinate
+    inc A
+
+    jmp [.loop]
+.return:
+    ret
+
 draw_character:
     pop H, L ; save return address
     pop C, B, A ; character, Y, X
@@ -74,3 +99,6 @@ draw_character:
     st C
 
     ret
+
+hello_str:
+    @str "Hello world!"
