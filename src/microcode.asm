@@ -108,7 +108,7 @@ lpm:
     li
 .reg:
     thl | rbo
-    sa | rsb | rbo | cr | pci
+    lpm | rsb | rbi | cr | pci
 .imm:
     po | ahi | pci
     po | ali | pci
