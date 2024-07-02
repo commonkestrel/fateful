@@ -628,8 +628,11 @@ impl State {
             )
         } else if cw.contains(ControlWord::LA) {
             match self.addr {
-                0x0000..=0xFFBF => self.mem[self.addr as usize],
-                0xFFC0..=0xFFFC => match self.peripherals.get(&((self.addr - 0xFFC0) as u8)) {
+                0x0000..=0xF7FF => self.mem[self.addr as usize],
+                0xF800..=0xFFCF => {
+                    self.text_buffer.get(self.addr - 0xF800)
+                }
+                0xFFD0..=0xFFFC => match self.peripherals.get(&((self.addr - 0xFFC0) as u8)) {
                     Some(periph) => unsafe {
                         if let Ok(stateful_read) =
                             periph.lib.library.get::<StatefulReadFn>(b"stateful_read")
@@ -670,10 +673,13 @@ impl State {
 
         if cw.contains(ControlWord::SA) {
             match self.addr {
-                0x0000..=0xFFBF => {
+                0x0000..=0xF7FF => {
                     self.mem[self.addr as usize] = bus;
                 }
-                0xFFC0..=0xFFFC => match self.peripherals.get(&((self.addr - 0xFFC0) as u8)) {
+                0xF800..=0xFFCF => {
+                    self.text_buffer.set(self.addr - 0xF800, bus);
+                }
+                0xFFD0..=0xFFFC => match self.peripherals.get(&((self.addr - 0xFFC0) as u8)) {
                     Some(periph) => unsafe {
                         if let Ok(stateful_write) =
                             periph.lib.library.get::<StatefulWriteFn>(b"stateful_write")

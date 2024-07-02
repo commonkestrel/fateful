@@ -25,12 +25,22 @@ impl TextBuffer {
 
         TextBuffer {data, handle}
     }
+
+    pub fn get(&self, addr: u16) -> u8 {
+        self.data[addr as usize]
+    }
+
+    pub fn set(&mut self, addr: u16, data: u8) {
+        self.data[addr as usize] = data;
+        println!("{}", self.data[addr as usize]);
+    }
 }
 
 async fn run_handle(buffer: BufferPtr) {
     let mut opts = WindowOptions::default();
     opts.scale = Scale::FitScreen;
-    opts.scale_mode = ScaleMode::Center;
+    opts.scale_mode = ScaleMode::AspectRatioStretch;
+    opts.resize = true;
 
     let mut window = minifb::Window::new("f8ful", WIDTH, HEIGHT, opts).expect("should be able to create window");
     let mut fb = [0x00000000; WIDTH*HEIGHT];
@@ -48,14 +58,16 @@ async fn run_handle(buffer: BufferPtr) {
                     (*buffer.0)[char_idx]
                 };
 
-                let font_addr = (character as usize) << 4 + font_y;
-                let lit = FONT[font_addr] & !(1 << font_x) > 0;
+                let font_addr = ((character as usize) << 4) + font_y;
+                let lit = FONT[font_addr] & (1 << (7 - font_x)) > 0;
+
 
                 // This part isn't part of the actual CPU,
                 // the real value will be transmitted via wire instead of stored.
                 fb[x + y*WIDTH] = if lit {0x00FFFFFF} else {0x00000000};
-                window.update_with_buffer(&fb, WIDTH, HEIGHT).expect("should be able to update window");
             }
         }
+
+        window.update_with_buffer(&fb, WIDTH, HEIGHT).expect("should be able to update window");
     }
 }
