@@ -294,18 +294,20 @@ struct Alu {
 }
 
 impl Alu {
-    fn compute(&self, aol: bool, aom: bool, aoh: bool, carry: bool) -> u8 {
+    fn compute(&self, aol: bool, aom: bool, aoh: bool, sreg: &mut SReg) -> u8 {
+        let previous = self.primary;
+
         match (aoh, aom, aol) {
             (false, false, false) => self.primary.wrapping_add(self.secondary),
             (false, false, true) => self.primary.wrapping_sub(self.secondary),
             (false, true, false) => self
                 .primary
                 .wrapping_add(self.secondary)
-                .wrapping_add(carry as u8),
+                .wrapping_add(sreg.contains(SReg::C) as u8),
             (false, true, true) => self
                 .primary
                 .wrapping_sub(self.secondary)
-                .wrapping_sub(carry as u8),
+                .wrapping_sub(sreg.contains(SReg::C) as u8),
             (true, false, false) => !(self.primary & self.secondary),
             (true, false, true) => self.primary | self.secondary,
             _ => 0x00,
@@ -624,7 +626,7 @@ impl State {
                 cw.contains(ControlWord::AOL),
                 cw.contains(ControlWord::AOM),
                 cw.contains(ControlWord::AOH),
-                self.sreg.contains(SReg::C),
+                &mut self.sreg,
             )
         } else if cw.contains(ControlWord::LA) {
             match self.addr {
