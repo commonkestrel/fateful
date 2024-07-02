@@ -142,8 +142,7 @@ pub fn include(path: Path, libs: &mut HashMap<String, Lib>) -> Result<TokenStrea
 
             note!("reading imported file: {}", path.display()).emit();
 
-            // we're ok to `unwrap()` the last element, since we already made sure there was at least one element when getting `locator`
-            lex::lex(Input::new(&path).unwrap()) //.map_err(|err| vec![spanned_error!(p.last().unwrap().span.clone(), "unable to read file: {err}")])?)
+            lex::lex(Input::new(&path).map_err(|err| vec![spanned_error!(p.last().unwrap().span.clone(), "unable to read file `{path}`: {err}", path=path.display())])?)
         }
     }
 }
