@@ -277,15 +277,23 @@
         add %reg, 1
     }
     ; 16-bit
-    (%low:reg, %high:reg) {
+    (%high:reg, %low:reg) {
         add %low, 1
         adc %high, 0
     }
 }
 
 /// Decrements the given value
-@macro dec (%reg:reg) {
-    sub %reg, 1
+@macro dec {
+    ; 8-bit
+    (%reg:reg) {
+        sub %reg, 1
+    }
+    ; 16-bit
+    (%high:reg, %low:reg) {
+        sub %low, 1
+        sbb %high, 0
+    }
 }
 
 /// Bitwise inverts the given byte
@@ -310,3 +318,5 @@
 @macro nop () {
     mv A, A ; shortest instruction with no side effects: 3 clock cycles
 }
+
+@macro use(%label:ident|label) {}
