@@ -53,6 +53,8 @@ fn main() -> Result<(), Error> {
     println!("cargo:rerun-if-changed=src/microcode.asm");
     println!("cargo:rerun-if-changed=build.rs");
 
+    create_display_multiplier()?;
+
     let file = fs::read_to_string("src/microcode.asm")?;
     let lex = Token::lexer(&file);
     let stream = Stream::parse(lex)?;
@@ -82,6 +84,10 @@ fn main() -> Result<(), Error> {
     fs::write(out_dir.join("ctrl_mid.rom"), &ctrl_mid)?;
     fs::write(out_dir.join("ctrl_high.rom"), &ctrl_high)?;
 
+    Ok(())
+}
+
+fn create_display_multiplier() -> Result<(), Error> {
     Ok(())
 }
 

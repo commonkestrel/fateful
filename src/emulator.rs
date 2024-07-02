@@ -19,6 +19,7 @@ use async_std::{
 use bitflags::bitflags;
 use clap::Args;
 use clio::Input;
+use display::TextBuffer;
 use libloading::Library;
 use modular_bitfield::prelude::*;
 use thiserror::Error;
@@ -559,6 +560,7 @@ struct State {
     mem: Box<[u8]>,
     program: Box<[u8]>,
     peripherals: HashMap<u8, Peripheral>,
+    text_buffer: TextBuffer,
 }
 
 impl State {
@@ -578,6 +580,7 @@ impl State {
             mem: vec![0; 1 << 16].into_boxed_slice(),
             program,
             peripherals: HashMap::new(),
+            text_buffer: TextBuffer::spawn(),
         }
     }
 

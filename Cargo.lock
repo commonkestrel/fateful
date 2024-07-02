@@ -14,7 +14,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "fateful_peripheral",
- "minifb",
+ "minifb 0.25.0",
 ]
 
 [[package]]
@@ -527,6 +527,7 @@ dependencies = [
  "lazy-regex",
  "libloading",
  "logos",
+ "minifb 0.27.0",
  "modular-bitfield",
  "once_cell",
  "serialport",
@@ -1051,7 +1052,33 @@ dependencies = [
  "lazy_static",
  "libc",
  "orbclient",
- "raw-window-handle",
+ "raw-window-handle 0.4.3",
+ "serde",
+ "serde_derive",
+ "tempfile",
+ "wasm-bindgen-futures",
+ "wayland-client",
+ "wayland-cursor",
+ "wayland-protocols",
+ "winapi",
+ "x11-dl",
+]
+
+[[package]]
+name = "minifb"
+version = "0.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b0c470a74618b43cd182c21b3dc1e6123501249f3bad9a0085e95d1304ca2478"
+dependencies = [
+ "cc",
+ "dlib",
+ "futures",
+ "instant",
+ "js-sys",
+ "lazy_static",
+ "libc",
+ "orbclient",
+ "raw-window-handle 0.6.2",
  "serde",
  "serde_derive",
  "tempfile",
@@ -1285,6 +1312,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "raw-window-handle"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "20675572f6f24e9e76ef639bc5552774ed45f1c30e2951e1e99c59888861c539"
+
+[[package]]
 name = "redox_syscall"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1418,7 +1451,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "fateful_peripheral",
- "minifb",
+ "minifb 0.25.0",
 ]
 
 [[package]]
