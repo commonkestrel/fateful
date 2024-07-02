@@ -53,7 +53,7 @@ async fn run_handle(buffer: BufferPtr) {
 
                 let char_x = x / 8;
                 let char_y = y / 16;
-                let char_idx = char_x + char_y*WIDTH/16;
+                let char_idx = char_x + char_y*WIDTH/8;
                 let character = unsafe {
                     (*buffer.0)[char_idx]
                 };
