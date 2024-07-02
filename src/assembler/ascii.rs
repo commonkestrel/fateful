@@ -35,9 +35,7 @@ impl TryFrom<String> for AsciiStr {
 
 impl std::fmt::Debug for AsciiStr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", unsafe {
-            std::str::from_utf8_unchecked(&self.inner)
-        })
+        write!(f, "{:?}", self.inner)
     }
 }
 
