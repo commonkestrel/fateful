@@ -567,7 +567,7 @@ impl State {
     fn init(program: Box<[u8]>) -> Self {
         State {
             pc: 0,
-            sp: 0xFFBF,
+            sp: 0xF7FF,
             ctrl: Control::default(),
             sreg: SReg::empty(),
             timer: 0,
@@ -811,7 +811,7 @@ impl State {
         self.ctrl.clock = 0;
         self.mem.fill(0);
         self.sreg = SReg::from_bits_retain(0);
-        self.sp = 0xFFBF;
+        self.sp = 0xF7FF;
         self.alu.clear();
         self.bank.clear();
 
