@@ -1,28 +1,28 @@
 // All pre-built macros
 
 @macro push {
-    ; push two registers
-    (%r0:reg, %r1:reg) {
+    ; push two values
+    (%r0:reg|imm, %r1:reg|imm) {
         push %r0
         push %r1
     }
-    ; push three registers
-    (%r0:reg, %r1:reg, %r2:reg) {
+    ; push three values
+    (%r0:reg|imm, %r1:reg|imm, %r2:reg|imm) {
         push %r0
         push %r1, %r2
     }
-    ; push four registers
-    (%r0:reg, %r1:reg, %r2:reg, %r3:reg) {
+    ; push four values
+    (%r0:reg|imm, %r1:reg|imm, %r2:reg|imm, %r3:reg|imm) {
         push %r0
         push %r1, %r2, %r3
     }
-    ; push five registers
-    (%r0:reg, %r1:reg, %r2:reg, %r3:reg, %r4:reg) {
+    ; push five values
+    (%r0:reg|imm, %r1:reg|imm, %r2:reg|imm, %r3:reg|imm, %r4:reg|imm) {
         push %r0
         push %r1, %r2, %r3, %r4
     }
-    ; push six registers
-    (%r0:reg, %r1:reg, %r2:reg, %r3:reg, %r4:reg, %r5:reg) {
+    ; push six values
+    (%r0:reg|imm, %r1:reg|imm, %r2:reg|imm, %r3:reg|imm, %r4:reg|imm, %r5:reg|imm) {
         push %r0
         push %r1, %r2, %r3, %r4, %r5
     }
