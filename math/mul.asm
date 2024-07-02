@@ -16,20 +16,26 @@ mul:
 /// Multiples the top 16-bit integers on the stack, pushing the result back to the stack,
 /// with high at the top of the stack
 mul16:
+    pop H, L ; save return address
+
     mv A, 0
     mv B, 0
     pop E ; H0
     pop F ; L0
     pop C ; H1
     pop D ; L1
+
+    push L, H ; store return address
 .loop:
     add16 A, B, E, F
     dec C, D
-    mv H, C
-    or H, D
-    jnz H, [.loop]
+    jnz C, [.loop]
+    jnz D, [.loop]
+
+    pop H, L ; save return address 
     push B, A ; LO, HO
-    
+    push L, H ; store return address
+
     ret
 
 @endif
