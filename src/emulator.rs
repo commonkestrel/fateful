@@ -287,6 +287,39 @@ bitflags! {
     }
 }
 
+trait Notified {
+    fn notified_add(self, other: Self, sreg: &mut SReg) -> Self;
+    fn notified_sub(self, other: Self, sreg: &mut SReg) -> Self;
+}
+
+impl Notified for u8 {
+    fn notified_add(self, other: Self, sreg: &mut SReg) -> Self {
+        match self.checked_add(other) {
+            Some(val) => {
+                sreg.remove(SReg::C);
+                val
+            }
+            None => {
+                sreg.insert(SReg::C);
+                self.wrapping_add(other)
+            }
+        }
+    }
+
+    fn notified_sub(self, other: Self, sreg: &mut SReg) -> Self {
+        match self.checked_sub(other) {
+            Some(val) => {
+                sreg.remove(SReg::C);
+                val
+            },
+            None => {
+                sreg.insert(SReg::C);
+                self.wrapping_sub(other)
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct Alu {
     primary: u8,
@@ -295,19 +328,17 @@ struct Alu {
 
 impl Alu {
     fn compute(&self, aol: bool, aom: bool, aoh: bool, sreg: &mut SReg) -> u8 {
-        let previous = self.primary;
-
         match (aoh, aom, aol) {
-            (false, false, false) => self.primary.wrapping_add(self.secondary),
-            (false, false, true) => self.primary.wrapping_sub(self.secondary),
+            (false, false, false) => self.primary.notified_add(self.secondary, sreg),
+            (false, false, true) => self.primary.notified_sub(self.secondary, sreg),
             (false, true, false) => self
                 .primary
-                .wrapping_add(self.secondary)
-                .wrapping_add(sreg.contains(SReg::C) as u8),
+                .notified_add(self.secondary, sreg)
+                .notified_add(sreg.contains(SReg::C) as u8, sreg),
             (false, true, true) => self
                 .primary
-                .wrapping_sub(self.secondary)
-                .wrapping_sub(sreg.contains(SReg::C) as u8),
+                .notified_sub(self.secondary, sreg)
+                .notified_sub(sreg.contains(SReg::C) as u8, sreg),
             (true, false, false) => !(self.primary & self.secondary),
             (true, false, true) => self.primary | self.secondary,
             _ => 0x00,
