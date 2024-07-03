@@ -294,7 +294,6 @@ trait Notified {
 
 impl Notified for u8 {
     fn notified_add(self, other: Self, sreg: &mut SReg, remove: bool) -> Self {
-        println!("notified; check: {:?}", self.checked_add(other));
         match self.checked_add(other) {
             Some(val) => {
                 if remove {
@@ -303,7 +302,6 @@ impl Notified for u8 {
                 val
             }
             None => {
-                println!("insert");
                 sreg.insert(SReg::C);
                 self.wrapping_add(other)
             }

@@ -55,6 +55,7 @@ pub type Errors = Vec<Diagnostic>;
 
 pub fn assemble(mut args: AssemblerArgs) -> Result<(), AssemblerError> {
     let start = Instant::now();
+    // Store the input name
     let input = format!("{}", args.input);
 
     let lexed = lex::lex(args.input)?;

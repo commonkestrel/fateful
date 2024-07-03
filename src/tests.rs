@@ -48,7 +48,10 @@ pub fn test_all(args: TestArgs) -> Result<(), ()> {
     let mut joined = Vec::new();
 
     for handle in handles {
-        joined.push((handle.0, handle.1.join().expect("one of the test threads panicked")));
+        joined.push((
+            handle.0,
+            handle.1.join().expect("one of the test threads panicked"),
+        ));
     }
 
     for handle in joined.iter() {

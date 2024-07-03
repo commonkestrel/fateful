@@ -142,7 +142,13 @@ pub fn include(path: Path, libs: &mut HashMap<String, Lib>) -> Result<TokenStrea
 
             note!("reading imported file: {}", path.display()).emit();
 
-            lex::lex(Input::new(&path).map_err(|err| vec![spanned_error!(p.last().unwrap().span.clone(), "unable to read file `{path}`: {err}", path=path.display())])?)
+            lex::lex(Input::new(&path).map_err(|err| {
+                vec![spanned_error!(
+                    p.last().unwrap().span.clone(),
+                    "unable to read file `{path}`: {err}",
+                    path = path.display()
+                )]
+            })?)
         }
     }
 }
