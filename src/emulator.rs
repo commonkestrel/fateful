@@ -288,28 +288,34 @@ bitflags! {
 }
 
 trait Notified {
-    fn notified_add(self, other: Self, sreg: &mut SReg) -> Self;
-    fn notified_sub(self, other: Self, sreg: &mut SReg) -> Self;
+    fn notified_add(self, other: Self, sreg: &mut SReg, remove: bool) -> Self;
+    fn notified_sub(self, other: Self, sreg: &mut SReg, remove: bool) -> Self;
 }
 
 impl Notified for u8 {
-    fn notified_add(self, other: Self, sreg: &mut SReg) -> Self {
+    fn notified_add(self, other: Self, sreg: &mut SReg, remove: bool) -> Self {
+        println!("notified; check: {:?}", self.checked_add(other));
         match self.checked_add(other) {
             Some(val) => {
-                sreg.remove(SReg::C);
+                if remove {
+                    sreg.remove(SReg::C);
+                }
                 val
             }
             None => {
+                println!("insert");
                 sreg.insert(SReg::C);
                 self.wrapping_add(other)
             }
         }
     }
 
-    fn notified_sub(self, other: Self, sreg: &mut SReg) -> Self {
+    fn notified_sub(self, other: Self, sreg: &mut SReg, remove: bool) -> Self {
         match self.checked_sub(other) {
             Some(val) => {
-                sreg.remove(SReg::C);
+                if remove {
+                    sreg.remove(SReg::C);
+                }
                 val
             },
             None => {
@@ -329,16 +335,16 @@ struct Alu {
 impl Alu {
     fn compute(&self, aol: bool, aom: bool, aoh: bool, sreg: &mut SReg) -> u8 {
         match (aoh, aom, aol) {
-            (false, false, false) => self.primary.notified_add(self.secondary, sreg),
-            (false, false, true) => self.primary.notified_sub(self.secondary, sreg),
+            (false, false, false) => self.primary.notified_add(self.secondary, sreg, true),
+            (false, false, true) => self.primary.notified_sub(self.secondary, sreg, true),
             (false, true, false) => self
                 .primary
-                .notified_add(self.secondary, sreg)
-                .notified_add(sreg.contains(SReg::C) as u8, sreg),
+                .notified_add(sreg.contains(SReg::C) as u8, sreg, true)
+                .notified_add(self.secondary, sreg, false),
             (false, true, true) => self
                 .primary
-                .notified_sub(self.secondary, sreg)
-                .notified_sub(sreg.contains(SReg::C) as u8, sreg),
+                .notified_sub(sreg.contains(SReg::C) as u8, sreg, true)
+                .notified_sub(self.secondary, sreg, false),
             (true, false, false) => !(self.primary & self.secondary),
             (true, false, true) => self.primary | self.secondary,
             _ => 0x00,
@@ -352,17 +358,17 @@ impl Alu {
                     sreg.insert(SReg::L);
                     sreg.remove(SReg::E);
                     sreg.remove(SReg::G);
-                },
+                }
                 Ordering::Equal => {
                     sreg.remove(SReg::L);
                     sreg.insert(SReg::E);
                     sreg.remove(SReg::G);
-                },
+                }
                 Ordering::Greater => {
                     sreg.remove(SReg::L);
                     sreg.remove(SReg::E);
                     sreg.insert(SReg::G);
-                },
+                }
             },
             (false, true, false) => sreg.set(SReg::Z, self.primary == 0),
             (false, true, true) => self.primary = bus,
@@ -662,9 +668,7 @@ impl State {
         } else if cw.contains(ControlWord::LA) {
             match self.addr {
                 0x0000..=0xF7FF => self.mem[self.addr as usize],
-                0xF800..=0xFFCF => {
-                    self.text_buffer.get(self.addr - 0xF800)
-                }
+                0xF800..=0xFFCF => self.text_buffer.get(self.addr - 0xF800),
                 0xFFD0..=0xFFFC => match self.peripherals.get(&((self.addr - 0xFFC0) as u8)) {
                     Some(periph) => unsafe {
                         if let Ok(stateful_read) =
@@ -816,7 +820,6 @@ impl State {
         }
 
         self.timer = self.timer.wrapping_add(1);
-
 
         if cw.contains(ControlWord::CR) {
             self.ctrl.clock = 0;
