@@ -23,8 +23,7 @@ unsafe impl Send for BufferPtr {}
 
 impl TextBuffer {
     pub fn spawn() -> TextBuffer {
-        let mut data = Box::pin([0; 1 << 12]);
-        data[0] = 0x12;
+        let data = Box::pin([0; 1 << 12]);
 
         let handle = async_std::task::spawn(run_handle(BufferPtr(&*data)));
 

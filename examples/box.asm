@@ -52,14 +52,14 @@ draw_top:
 
 draw_bottom:
     mv A, 1 ; A contains the X coordinate
-    push A, (1 + BOX_HEIGHT), BL_CORNER ; x, y, character
+    push A, BOX_HEIGHT, BL_CORNER ; x, y, character
     call [draw_character]
     mv B, (BOX_WIDTH - 2)
 .loop:
     inc A
     push A, B
 
-    push A, (1+BOX_HEIGHT), DASH
+    push A, BOX_HEIGHT, DASH
     call [draw_character]
 
     pop B, A
@@ -68,15 +68,44 @@ draw_bottom:
     jnz B, [.loop]
 
     inc A
-    push A, (1+BOX_HEIGHT), BR_CORNER
+    push A, BOX_HEIGHT, BR_CORNER
     call [draw_character]
 
     ret
 
 draw_left:
+inc A
+    mv A, 1 ; A contains the Y coordinate
+    mv B, (BOX_HEIGHT - 2)
+.loop:
+    inc A
+    push A, B
+
+    push 1, A, WALL
+    call [draw_character]
+
+    pop B, A
+
+    dec B
+    jnz B, [.loop]
+
     ret
 
 draw_right:
+    mv A, 1 ; A contains the Y coordinate
+    mv B, (BOX_HEIGHT - 2)
+.loop:
+    inc A
+    push A, B
+
+    push BOX_WIDTH, A, WALL
+    call [draw_character]
+
+    pop B, A
+
+    dec B
+    jnz B, [.loop]
+
     ret
 
 draw_hello:
@@ -106,7 +135,6 @@ draw_character:
     pop C, B, A ; character, Y, X
     push L, H ; store return address
     push A, C; save X coordinate and character
-    jeq B, (1+BOX_HEIGHT), [dbg]
 
     push B, 0, SCREEN_WIDTH, 0
     call [mul16] ; get Y offset
@@ -120,12 +148,6 @@ draw_character:
     st C
 
     ret
-
-dbg:
-    push B, 0, SCREEN_WIDTH, 0
-    call [mul16] ; get Y offset
-    pop H, L ; get value
-    halt
 
 hello_str:
     @str "Hello world!"
