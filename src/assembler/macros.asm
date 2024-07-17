@@ -320,3 +320,7 @@
 }
 
 @macro use(%label:ident|label) {}
+
+@macro shl (%r:reg) {
+    add %r, %r
+}
