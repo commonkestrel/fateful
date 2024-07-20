@@ -32,7 +32,7 @@ Input is positional, being the first argument, and the output can be specified w
 
 #### ADD
 
-Machine Code: `0x00`
+Machine Code: `0x0`
 
 Operation: Adds the first and second operand, storing the result in the first operand.
 
@@ -42,7 +42,7 @@ add <register>, <register/imm8>
 
 #### SUB
 
-Machine Code: `0x01`
+Machine Code: `0x1`
 
 Operation: Subtracts the second operand from the first, storing the result in the first operand.
 
@@ -52,7 +52,7 @@ sub <register>, <register/imm8>
 
 #### ADC
 
-Machine Code: `0x02`
+Machine Code: `0x2`
 
 Operation: Adds the first and second operands, plus an additional 1 if the carry bit is set, storing the result in the first operand.
 
@@ -62,7 +62,7 @@ adc <register>, <register/imm8>
 
 #### SBB
 
-Machine Code: `0x03`
+Machine Code: `0x3`
 
 Operation: Subtracts the second operand from the first, subtracting an additional 1 if the carry bit is set, storing the result in the first operand.
 
@@ -72,7 +72,7 @@ sbb <register>, <register/imm8>
 
 #### NAND
 
-Machine Code: `0x04`
+Machine Code: `0x4`
 
 Operation: Performs a bitwise NAND on the first and second operands, storing the result in the first operand.
 
@@ -82,13 +82,151 @@ nand <register>, <register/imm8>
 
 #### OR
 
-Machine Code: `0x05`
+Machine Code: `0x5`
 
 Operation: Performs a bitwise OR on the first and second operands,
 storing the result in the first operand.
 
 ```asm
 or <register>, <register/imm8>
+```
+
+#### CMP
+
+Machine Code: `0x6`
+
+Operation: Compares the first and second operands, storing the comparison results in the status register. 
+
+```asm
+cmp <register>, <register/imm8>
+```
+
+#### MV
+
+Machine Code: `0x7`
+
+Operation: Copies the second operand into the first operand.
+
+```asm
+mv <register>, <register/imm8>
+```
+
+#### LD
+
+Machine Code: `0x8`
+
+Operation: Loads the byte at either the RAM address provided, or the RAM address stored in the HL registers if none is provided, into the first operand.
+
+```asm
+ld <register>, [address]
+```
+
+#### ST
+
+Machine Code: `0x9`
+
+Operation: Stores the first operand into RAM at either the address provided, or the address stored in the HL registers if none is provided.
+
+```asm
+st [address,] <register>
+```
+
+#### LDA
+
+Machine Code: `0xA`
+
+Operation: Loads the provided 16-bit address into the HL registers.
+
+```asm
+lda <address>
+```
+
+#### LPM
+
+Machine Code: `0xB`
+
+Operation: Loads the byte at either the ROM address provided, or the ROM address stored in the HL registers if none is provided, into the first operand.
+
+```asm
+lpm <register>, [address]
+```
+
+#### PUSH
+
+Machine Code: `0xC`
+
+Operation: Stores the first operand to the RAM location currently pointed to by the stack pointer, then decrements the stack pointer. 
+
+```asm
+push <register/imm8>
+```
+
+#### POP
+
+Machine Code: `0xD`
+
+Operation: Increments the stack pointer, then loads the RAM location currently pointed to by the stack pointer into the first operand.
+
+```asm
+pop <register>
+```
+
+#### JNZ
+
+Machine Code: `0xE`
+
+Operation: Jumps to the address pointed to by the HL registers only if the first operand is not zero.
+
+```asm
+jnz <register/imm8>
+```
+
+#### HALT
+
+Machine Code: `0xF`
+
+Operation: Sets the H bit in the status register, halting the CPU
+
+```asm
+halt
+```
+
+### Pre-Processor Macros
+
+There are a variety of C-style preprocessor macros included in the assembler, indicated with a preceding `@`.
+These macros can apply conditional transformations to the source before compilation.
+
+#### DEFINE
+
+The define macro links an identifier to a group of tokens.
+Before compiling, each instance of this identifier is replaced with the specified tokens.
+
+Unlike C, this does not support function-style definitions, meaning no arguments are allowed.
+
+Syntax:
+```asm
+@define <identifier> <value>
+```
+
+#### Include
+
+The include macro pastes a stream of tokens from another file.
+The file must be located in a package, and can be indexed by filepath relative to the root of the package.
+
+A package is linked to an identifier through a rich comment, and can be either a local directory or a remote git repository.
+
+
+Syntax:
+```asm
+/// <package> = <path/git repository>
+@include <<package>/<file path>>
+```
+
+Example:
+
+```asm
+/// error = https://github.com/commonkestrel/f8ful_os
+@include <error/error.asm>
 ```
 
 ## Emulator
