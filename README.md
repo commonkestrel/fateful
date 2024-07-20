@@ -329,7 +329,43 @@ Code segments, signified by the `@cseg` directive,
 are where all of your assembly instructions are located.
 Each assembly program starts in an initial code segment.
 
+#### Data Segments
 
+Data segments, signified by the `@dseg`,
+are a block in RAM rather than the ROM.
+These segments allow you to reserve blocks for global variables.
+The variables defined in a data segment will reserve a RAM address while automatically avoiding collision.
+
+Variables can be defined with a few directives.
+These directives allow reserving blocks of variable size, specified here:
+| Directive                  | Size   |
+|----------------------------|--------|
+| `@byte <identifier>`       | 1      |
+| `@double <identifier>`     | 2      |
+| `@quad <identifier>`       | 4      |
+| `@var <size> <identifier>` | *size* |
+
+#### Organization
+
+Segments are automatically arranged to avoid collision,
+but they can be manually organized with the `@org` directive.
+This directive will place the origin of a segment at the address specified.
+This is especially useful to make sure that the origni of your code is placed at `0x0000`,
+since the program starts running from this point.
+
+Unfortunately, manual organization can result in collisions,
+so you must be careful to avoid these if manually organizing two or more segments of the same type.
+
+### Data
+
+You can place raw data within the program as well.
+This data can be acessed with `lpm`.
+Similar to variables in the data segment, these are placed with the following directives:
+
+* `@byte <imm8>`
+* `@double <imm16>`
+* `@quad <imm32>`
+* `@str <string>`
 
 ## Emulator
 
