@@ -204,7 +204,7 @@ Before compiling, each instance of this identifier is replaced with the specifie
 Unlike C, this does not support function-style definitions, meaning no arguments are allowed.
 
 Syntax:
-```asm
+```rs
 @define <identifier> <value>
 ```
 
@@ -217,14 +217,14 @@ A package is linked to an identifier through a rich comment, and can be either a
 
 
 Syntax:
-```asm
+```rs
 /// <package> = <path/git repository>
 @include <<package>/<file path>>
 ```
 
 Example:
 
-```asm
+```rs
 /// error = https://github.com/commonkestrel/f8ful_os
 @include <error/error.asm>
 ```
