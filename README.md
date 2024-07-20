@@ -191,10 +191,11 @@ Operation: Sets the H bit in the status register, halting the CPU
 halt
 ```
 
-### Pre-Processor Macros
+### Preprocessor Directives
 
-There are a variety of C-style preprocessor macros included in the assembler, indicated with a preceding `@`.
-These macros can apply conditional transformations to the source before compilation.
+There are a variety of C-style preprocessor directives included in the assembler, indicated with a preceding `@`.
+These directives can apply conditional transformations to the source before compilation.
+Macros are processed in top-down order, meaning if a `@define` is placed below an `@ifdef` in the file, the define will not be in scope during the check.
 
 #### DEFINE
 
@@ -206,6 +207,93 @@ Unlike C, this does not support function-style definitions, meaning no arguments
 Syntax:
 ```rs
 @define <identifier> <value>
+```
+
+#### UNDEF
+
+The `@undef` macro removes (undefines) the current definition of the given identifier.
+Consequently, subsequent occurrences of the identifier are ignored by the preprocessor.
+
+Syntax:
+```rs
+@undef <identifier>
+```
+
+#### ERROR
+
+The `@error` directive emits a user-specified error message before terminating the assembly.
+
+Syntax:
+```rs
+@error "error message"
+```
+
+#### IF
+
+The `@if` directive controls compilation of portions of a source file.
+If the expression you write after the `@if` is greater than 0, the block following the `@if` is retained for assembly.
+
+Syntax:
+```
+@if <expr>
+    ...
+@endif
+```
+
+#### ELIF
+
+The `@elif` directive is only allowed as part of an `@if` block,
+and is only evaluated if the previously evaluated blocks' check evaluates to 0.
+Similar to the `@if` directive, if the expression you write after the `@elif` is greater than 0, the block following the `@elif` is retained for assembly.
+
+Syntax:
+
+```
+@if <expr>
+    ...
+@elif <expr>
+    ...
+@endif
+```
+
+#### ELSE
+
+The `@else` directive is only allowed at the end of an `@if` block.
+If the expression of the previously evaluated block's check evaluates to 0,
+then the block following the `@else` is retained for assembly.
+
+Syntax:
+
+```
+@if <expr>
+    ...
+@else
+    ...
+@endif
+```
+
+#### IFDEF
+
+The `@ifdef` directive is functionally the same as `@if 1` if the identifier has been defined,
+and `@if 0` when the identifier hasn't been defined, or has been undefined by the `@undef` directive.
+
+Syntax:
+```
+@ifdef <identifier>
+    ...
+@endif
+```
+
+#### IFNDEF
+
+The `@ifndef` directive is functionally the same as `@if 0` if the identifier has been defined,
+and `@if 1` when the identifier hasn't been defined, or has been undefined by the `@undef` directive.
+
+Syntax:
+```
+@ifndef <identifier>
+    ...
+@endif
 ```
 
 #### Include
@@ -228,6 +316,20 @@ Example:
 /// error = https://github.com/commonkestrel/f8ful_os
 @include <error/error.asm>
 ```
+
+### Segments
+
+The assembly is divided into segments, specified with the `@cseg` and `@dseg` directives,
+and organized by the `@org` directive.
+Segments can be used to organize blocks of data and code throughout the address space.
+
+#### Code Segments
+
+Code segments, signified by the `@cseg` directive,
+are where all of your assembly instructions are located.
+Each assembly program starts in an initial code segment.
+
+
 
 ## Emulator
 
