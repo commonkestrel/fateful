@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::ops::{Deref, Range};
 use std::sync::Arc;
 
@@ -743,9 +744,18 @@ impl Deref for Bytes {
 }
 
 fn compile(
-    stream: Vec<ExpSeg>,
+    mut stream: Vec<ExpSeg>,
     mut data: HashMap<String, Usable>,
 ) -> Result<[u8; 1 << 16], Errors> {
+    // Pre-sort the segment stream to avoid segments placed physically
+    // above segments in the source from mistakenly coliding
+    stream.sort_by(|lhs, rhs| match (lhs.org.as_ref(), rhs.org.as_ref()) {
+        (Some(lhs_org), Some(rhs_org)) => lhs_org.value.cmp(&rhs_org.value),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    });
+
     let mut errors = Errors::new();
     let mut labels = HashMap::new();
     let mut ranges: Vec<Range<u16>> = Vec::new();
@@ -894,7 +904,16 @@ enum RegImm {
     Register(Register),
 }
 
-pub fn assemble_data(stream: Vec<DSeg>) -> Result<HashMap<String, Usable>, Errors> {
+pub fn assemble_data(mut stream: Vec<DSeg>) -> Result<HashMap<String, Usable>, Errors> {
+    // Pre-sort the segment stream to avoid segments placed physically
+    // above segments in the source from mistakenly coliding
+    stream.sort_by(|lhs, rhs| match (lhs.org.as_ref(), rhs.org.as_ref()) {
+            (Some(lhs_org), Some(rhs_org)) => lhs_org.value.cmp(&rhs_org.value),
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (None, None) => Ordering::Equal,
+    });
+
     let mut variables = HashMap::new();
     let mut errors = Errors::new();
     let mut ranges: Vec<std::ops::Range<u16>> = Vec::new();

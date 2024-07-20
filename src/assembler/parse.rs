@@ -373,7 +373,6 @@ impl Parsable for ParseTok {
             }) => {
                 cursor.position += 1;
                 let val: LitString = cursor.parse()?;
-                println!("{:?}", val.value);
                 let _: NewLine = cursor.parse()?;
 
                 Ok(ParseTok::Bytes(val.value.into_bytes()))
