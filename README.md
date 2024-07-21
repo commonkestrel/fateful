@@ -191,6 +191,23 @@ Operation: Sets the H bit in the status register, halting the CPU
 halt
 ```
 
+### Labels
+
+Labels help make blocks of your program easily accessible.
+They consist of an identifier followed by a colon (`:`).
+Labels with an identifier beginning with `.` are considered local to the most recent global label.
+Local labels can also be accessed globally via `<parent>.<local>`.
+
+Example:
+```asm
+parent:
+    ; assembly code
+.local1:
+    jmp [.local1]
+.local2:
+    jmp [parent.local2]
+```
+
 ### Preprocessor Directives
 
 There are a variety of C-style preprocessor directives included in the assembler, indicated with a preceding `@`.
@@ -345,6 +362,8 @@ These directives allow reserving blocks of variable size, specified here:
 | `@quad <identifier>`       | 4      |
 | `@var <size> <identifier>` | *size* |
 
+These variables will resolve to an address at assembly, and can be accessed via *$identifier*.
+
 #### Organization
 
 Segments are automatically arranged to avoid collision,
@@ -366,6 +385,240 @@ Similar to variables in the data segment, these are placed with the following di
 * `@double <imm16>`
 * `@quad <imm32>`
 * `@str <string>`
+
+This data is often used in conjunction with a label in order to make it easily locatable.
+
+Example
+```c
+hello:
+    @str "hello world"
+```
+
+### Macros
+
+Macros are an incredibly powerful part of this assembler, 
+and are defined with the `@macro` directive.
+They are similar to C's function-style `#define` macros,
+but with optionally typed parameters and multiple definitions for different parameters.
+
+Each parameter can have an accepted type, or multiple accepted types with the `|` operator.
+Parameter identifiers must begin with a `%`.
+These types are listed here:
+
+* `reg`: Matches a register input (A, B, C, D, E, F, H, L)
+* `imm`: Matches an immediate integer
+* `addr`: Matches a RAM address
+* `label`: Matches a ROM address
+* `ident`: Matches any identifier
+* `str`: Matches a string literal
+* `any`: Matches any of the previous
+
+Syntax:
+```asm
+; This syntax defines a singular signiture
+@macro <identifier> (<parameters>) {
+    ; assembly code
+}
+
+; This syntax allows for the definition of multiple signitures
+@macro <identifier> {
+    (<parameters>) {
+
+    }
+
+    (<parameters>) {
+
+    }
+}
+```
+
+This may be a little confusing, so we can use an example from the built-in macros (we'll get to these later):
+
+```asm
+@macro jmp {
+    () {
+        jnz 1
+    }
+    (%location:label) {
+        lda %location
+        jmp
+    }
+}
+```
+
+What are we even looking at here?
+Well, this macro contains two signitures - 
+one with an empty parameter list and one with a ROM address bound to the `%location` parameter.
+As you can see, the second signiture contains another `jmp` instruction,
+showcasing the fact that these macros are evaluated recursively.
+
+Macros are used just like normal instructions.
+For example, the `jmp` macro can be used like `jmp [foo]`,
+which expands to this:
+
+```asm
+lda [foo]
+jnz 1
+```
+
+### Built-in Macros
+
+* [PUSH](#push-macro)
+* [POP](#pop-macro)
+* [PUSHA](#pusha-macro)
+* [POPA](#popa-macro)
+* [JMP](#jmp-macro)
+* [JNZ](#jnz-macro)
+* [JLT](#jlt-macro)
+* [JLE](#jle-macro)
+* [JGT](#jgt-macro)
+* [JGE](#jge-macro)
+
+#### PUSH Macro
+
+`push r0: reg|imm, r1: reg|imm`
+
+Pushes two values to the stack in ascending parameter order.
+
+`push r0: reg|imm, r1: reg|imm, r2: reg|imm`
+
+Pushes three values to the stack in ascending parameter order.
+
+`push r0: reg|imm, r1: reg|imm, r2: reg|imm, r3: reg|imm`
+
+Pushes four values to the stack in ascending parameter order.
+
+`push r0: reg|imm, r1: reg|imm, r2: reg|imm, r3: reg|imm, r4: reg|imm`
+
+Pushes five values to the stack in ascending parameter order.
+
+`push r0: reg|imm, r1: reg|imm, r2: reg|imm, r3: reg|imm, r4: reg|imm, r5: reg|imm`
+
+Pushes six values to the stack in ascending parameter order.
+
+#### POP Macro
+
+`pop r0: reg|imm, r1: reg|imm`
+
+Pops two values from the stack in ascending parameter order.
+
+`pop r0: reg|imm, r1: reg|imm, r2: reg|imm`
+
+Pops three values from the stack in ascending parameter order.
+
+`pop r0: reg|imm, r1: reg|imm, r2: reg|imm, r3: reg|imm`
+
+Pops four values from the stack in ascending parameter order.
+
+`pop r0: reg|imm, r1: reg|imm, r2: reg|imm, r3: reg|imm, r4: reg|imm`
+
+Pops five values from the stack in ascending parameter order.
+
+`pop r0: reg|imm, r1: reg|imm, r2: reg|imm, r3: reg|imm, r4: reg|imm, r5: reg|imm`
+
+Pops six values from the stack in ascending parameter order.
+
+#### PUSHA Macro
+
+`pusha`
+
+Pushes all six general-purpose registers to the stack in ascending order.
+Designed to be paired with the `popa` macro.
+
+#### POPA Macro
+
+`popa` 
+
+Pops the top 6 values on the stack into the six general-purpose registers in decending order.
+Designed to be paired with the `pusha` macro.
+
+#### JMP Macro
+
+`jmp`
+
+Jumps to the location pointed to by the HL register unconditionally.
+
+`jmp location: label`
+
+Jumps to *location* unconditionally.
+
+#### JNZ Macro
+
+`jnz condition: reg|imm, location:label`
+
+Jumps to *location* if *condition* is not zero.
+
+#### JLT Macro
+
+`jlt`
+
+Jumps to the address pointed to by the HL registers if the `L` flag in the status register is set.
+
+`jlt location: label`
+
+Jumps to *location* if the `L` flag in the status register is set.
+
+`jlt x: reg, y: reg|imm`
+
+Jumps to the location pointed to by the HL registers if *x* < *y*.
+
+`jlt x: reg, y: reg|imm, location: label`
+
+Jumps to *location* if *x* < *y*.
+
+#### JLE Macro
+
+`jle`
+
+Jumps to the address pointed to by the HL registers if the `L` or `E` flags in the status register are set.
+
+`jle location: label`
+
+Jumps to *location* if the `L` or `E` flags in the status register are set.
+
+`jle x: reg, y: reg|imm`
+
+Jumps to the location pointed to by the HL registers if *x* <= *y*.
+
+`jle x: reg, y: reg|imm, location: label`
+
+Jumps to *location* if *x* <= *y*.
+
+#### JGT Macro
+
+`jgt`
+
+Jumps to the address pointed to by the HL registers if the `G` flag in the status register is set.
+
+`jgt location: label`
+
+Jumps to *location* if the `G` flag in the status register is set.
+
+`jgt x: reg, y: reg|imm`
+
+Jumps to the location pointed to by the HL registers if *x* > *y*.
+
+`jgt x: reg, y: reg|imm, location: label`
+
+Jumps to *location* if *x* > *y*.
+
+#### JGE Macro
+
+`jge`
+
+Jumps to the address pointed to by the HL registers if the `G` or `E` flags in the status register are set.
+
+`jge location: label`
+
+Jumps to *location* if the `G` or `E` flags in the status register are set.
+
+`jge x: reg, y: reg|imm`
+
+Jumps to the location pointed to by the HL registers if *x* >= *y*.
+
+`jge x: reg, y: reg|imm, location: label`
+
+Jumps to *location* if *x* >= *y*.
 
 ## Emulator
 
