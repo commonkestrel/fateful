@@ -338,6 +338,7 @@ Example:
 
 The assembly is divided into segments, specified with the `@cseg` and `@dseg` directives,
 and organized by the `@org` directive.
+The `@org` directive will apply to the current segment, and can only be specified once per segment.
 Segments can be used to organize blocks of data and code throughout the address space.
 
 #### Code Segments
@@ -473,6 +474,21 @@ jnz 1
 * [JLE](#jle-macro)
 * [JGT](#jgt-macro)
 * [JGE](#jge-macro)
+* [JEQ](#jeq-macro)
+* [JZ](#jz-macro)
+* [CALL](#call-macro)
+* [RET](#ret-macro)
+* [MV16](#mv16-macro)
+* [ADD16](#add16-macro)
+* [SUB16](#sub16-macro)
+* [INC](#inc-macro)
+* [DEC](#dec-macro)
+* [NOT](#not-macro)
+* [AND](#and-macro)
+* [XOR](#xor-macro)
+* [SHL](#shl-macro)
+* [NOP](#nop-macro)
+* [USE](#use-macro)
 
 #### PUSH Macro
 
@@ -619,6 +635,127 @@ Jumps to the location pointed to by the HL registers if *x* >= *y*.
 `jge x: reg, y: reg|imm, location: label`
 
 Jumps to *location* if *x* >= *y*.
+
+#### JEQ Macro
+
+`jeq`
+
+Jumps to the address pointed to by the HL registers if the `E` flag in the status register is set.
+
+`jeq location: label`
+
+Jumps to *location* if the `E` flag in the status register is set.
+
+`jeq x: reg, y: reg|imm`
+
+Jumps to the location pointed to by the HL registers if *x* == *y*.
+
+`jeq x: reg, y: reg|imm, location: label`
+
+Jumps to *location* if *x* == *y*.
+
+#### JZ Macro
+
+`jz condition: reg|imm, location: label`
+
+Jumps to *location* if *condition* is 0.
+
+#### CALL Macro
+
+`call`
+
+Pushes the return address to the stack and jumps to the address pointed to by the HL registers.
+Designed to be paired with the `ret` macro.
+
+`call location: label`
+
+Pushes the return address to the stack and jumps to *location*.
+Designed to be paired with the `ret` macro.
+
+#### RET Macro
+
+`ret`
+
+Jumps to the address stored at the *top* of the stack.
+
+#### MV16 Macro
+
+`mv16 high: reg, low: reg, imm: imm`
+
+Moves a 16-bit immediate integer into the provided registers.
+
+#### ADD16 Macro
+
+`add16 h0: reg, l0: reg, h1: reg|imm, l1: reg|imm`
+
+Adds two 16-bit integers.
+*h0* and *l0* make up the high and low bytes of the first operand,
+with *h1* and *l1* making up the high and low bytes of the second operand.
+
+#### SUB16 Macro
+
+`sub16 h0: reg, l0: reg, h1: reg|imm, l1: reg|imm`
+Subtracts two 16-bit integers.
+*h0* and *l0* make up the high and low bytes of the first operand,
+with *h1* and *l1* making up the high and low bytes of the second operand.
+
+#### INC Macro
+
+`inc reg: reg`
+
+Adds 1 to the value contained in *reg*, storing the result back in *reg*.
+
+`inc high: reg, low: reg`
+
+Adds 1 to the 16-bit value contained in *high* and *low*,
+storing the result back in *high* and *low*.
+
+#### DEC Macro
+
+`dec reg: reg`
+
+Subtracts 1 from the value contained in *reg*, storing the result back in *reg*.
+
+`dec high: reg, low: reg`
+
+Subtracts 1 from the 16-bit value contained in *high* and *low*,
+storing the result back in *high* and *low*.
+
+#### NOT Macro
+
+`not reg: reg`
+
+Performs a bitwise NOT operation on *reg*, storing the result back in *reg*.
+
+#### AND Macro
+
+`and x: reg, y: reg|imm`
+
+Performs a bitwise AND operation on *x* and *y*, storing the result in *x*.
+
+#### XOR Macro
+
+`and x: reg, y: reg|imm`
+
+Performs a bitwise XOR operation on *x* and *y*, storing the result in *x*.
+
+#### SHL Macro
+
+`shl reg: reg`
+
+Performs a logical shift left on *reg*, storing the result back in *reg*
+
+#### NOP Macro
+
+`nop`
+
+Performs an operation that has no effect, taking 4 clock cycles (the same as `ADD`).
+
+#### USE Macro
+
+`use label: label|ident`
+
+Eliminates the `warning: unused label definition` message for *label*.
 
 ## Emulator
 

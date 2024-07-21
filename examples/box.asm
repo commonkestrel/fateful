@@ -13,11 +13,11 @@
 @define WALL 0xBA
 @define DASH 0xCD
 
-@org 0x0000
-jmp [_start]
-
 /// math = ./math
 @include <math/mul.asm>
+
+@cseg
+@org 0x0000
 
 _start:
     call [draw_top]
