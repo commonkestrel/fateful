@@ -872,11 +872,40 @@ Peripherals are a way to extend the emulator,
 simulating a memory-mapped peripheral.
 This is done through the use of dynamic library loading,
 so you can create a peripheral in any language that supports the C ABI.
+Peripherals can be attached to one or more slots in the top 48 bytes of RAM.
+
 
 ### Stateless Peripherals
 
 Stateless peripherals are the simplest form of peripheral,
 with state being managed by the peripheral rather than the emulator.
 
-There is a Rust crate ([`fateful_peripheral`](https://github.com/commonkestrel/fateful_peripheral))
-to make creating peripherals easy.
+#### Initialization
+
+Stateless peripherals are initialized by a function with the signiture `int init(unsigned char)`.
+The return value of this is expalined in [errors](#errors).
+The input parameter provides the number of slots that the peripheral has been attached to.
+
+#### Reading and Writing
+
+Peripherals can be written through a function with the signiture `void write(unsigned char, unsigned char)`.
+The first parameter is the slot index that is being written to, and the second parameter is the value being written.
+
+Peripherals can be read from with a function with the signiture `unsigned char read(unsigned char)`
+The input parameter is the slot index that is being read from, and the return value should be the value at the slot.
+
+### Errors
+
+Errors are only checked upon initialization - after both `init` and `stateful_init`.
+If either of these functions return a non-zero value,
+the emulator will check for a function with the signiture `int last_error_length()`.
+If this function exists, the emulator will then check for a function with the signiture `*char last_error()`.
+`last_error_length` should return the length of the ASCII string pointed to by the result of `last_error`.
+
+### Names
+
+Peripherals can optionally have a name that will displayed when the emulator is `DUMP`ed.
+This must be supplied by a function with the following signiture: `*char name()`.
+
+There is a Rust crate - ([`fateful_peripheral`](https://github.com/commonkestrel/fateful_peripheral)) -
+designed to make creating peripherals easy.
