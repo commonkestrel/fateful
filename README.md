@@ -759,13 +759,124 @@ Eliminates the `warning: unused label definition` message for *label*.
 
 ## Emulator
 
+The f8ful emulator simulates each individual clock cycle,
+using the CPU's microcode to determine what to do on each pulse.
+An upside to this is that you can dump the CPU at any time and see the microcode and program counter for each clock pulse.
+A downside, however, is that the emulator is much slower than it could be,
+since it has to check every microcode flag for every clock pulse.
+
+The emulator contains a REPL with a few useful commands:
+
+* [SET](#set)
+* [GET](#get)
+* [PEEK](#peek)
+* [POKE](#poke)
+* [RUN](#RUN)
+* [LOAD](#load)
+* [DROP](#drop)
+* [DUMP](#dump)
+* [STEP](#step)
+* [RESET](#reset)
+* [STOP](#stop)
+* [QUIT](#quit)
+* [HELP](#help)
+
+### SET
+
+Syntax: `SET <register>, <value>`
+
+Sets the value of *register* to *value*.
+
+### GET
+
+Syntax: `GET <register>`
+
+Prints the data stored in *register*.
+
+### PEEK
+
+Syntax: `PEEK <address>`
+
+Prints the data stored in memory at *address*.
+
+### POKE
+
+Syntax: `POKE <address>, <value>`
+
+Sets the memory at *address* to *value*.
+
+### RUN
+
+Syntax: `RUN <speed>`
+
+Runs the emulator clock at *speed* in HZ.
+If *speed* is zero the emulator clock will run uncapped.
+
+### LOAD
+
+Syntax: `LOAD <path>, <address>`
+
+Attaches the [peripheral](#peripherals) located at *path* to *address*.
+
+### DROP
+
+Syntax: `DROP <address>`
+
+Drops the [peripheral](#peripherals) attached to *address* if there is one.
+
+### DUMP
+
+Syntax: `DUMP`
+
+Prints the current machine state.
+Includes information such as the program counter,
+stack pointer, status register, ALU registers,
+general purpose registers, etc...
+
+### STEP
+
+Syntax: `STEP`
+
+Steps the emulator clock by one pulse.
+Only works if the emulator clock is stopped.
+
+### RESET
+
+Syntax: `RESET`
+
+Resets the CPU state to the initial state.
+
+### STOP
+
+Syntax: `STOP`
+
+Stops the emulator clock.
+Only works if the emulator clock is running.
+
+### QUIT
+
+Syntax: `QUIT`
+
+Drops all peripherals and quits the emulator.
+
+### HELP
+
+Syntax: `HELP`
+
+Prints a help message detailing the REPL's commands.
+
 ## Tests
 
 ## Peripherals
 Peripherals are a way to extend the emulator,
 simulating a memory-mapped peripheral.
-This is through the use of dynamic library loading,
+This is done through the use of dynamic library loading,
 so you can create a peripheral in any language that supports the C ABI.
+
+### Stateless Peripherals
+
+Stateless peripherals are the simplest form of peripheral,
+with state being managed by the peripheral rather than the emulator.
 
 There is a Rust crate ([`fateful_peripheral`](https://github.com/commonkestrel/fateful_peripheral))
 to make creating peripherals easy.
