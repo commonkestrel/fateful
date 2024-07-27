@@ -8,7 +8,7 @@ Fateful can be installed through [cargo](https://github.com/rust-lang/cargo) via
 Running a program has two steps: assembly and emulation.
 To assemble a program, run `fateful assemble <program>.asm -o <program>.bin`
 If this is successful, you can emulate the program with `fateful emulate <program>.bin`
-The emulator is a REPL that contains various commands expalined (below)[#emulator].
+The emulator is a REPL that contains various commands expalined [below](#emulator).
 The most important command for emulating a program is `RUN`.
 Inputting `RUN 0` will run the assembly program as fast as possible until a halt is detected.
 
