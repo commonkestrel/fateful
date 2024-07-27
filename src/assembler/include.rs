@@ -15,7 +15,7 @@ use crate::{note, spanned_error};
 use clio::Input;
 use git2::Repository;
 
-const CACHE_DIR: &str = "fateful-cache";
+const CACHE_DIR: &str = ".fateful-cache";
 
 #[derive(Debug)]
 pub struct Lib {

@@ -13,7 +13,7 @@
 @define WALL 0xBA
 @define DASH 0xCD
 
-/// math = ./math
+/// math = https://github.com/commonkestrel/fateful_math
 @include <math/mul.asm>
 
 @cseg

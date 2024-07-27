@@ -5,6 +5,13 @@ Fateful is a CLI tool foring with my custom CPU, F8ful.
 It contains an emulator and an assembler.
 Fateful can be installed through [cargo](https://github.com/rust-lang/cargo) via `cargo install --git https://github.com/commonkestrel/fateful`.
 
+Running a program has two steps: assembly and emulation.
+To assemble a program, run `fateful assemble <program>.asm -o <program>.bin`
+If this is successful, you can emulate the program with `fateful emulate <program>.bin`
+The emulator is a REPL that contains various commands expalined (below)[#emulator].
+The most important command for emulating a program is `RUN`.
+Inputting `RUN 0` will run the assembly program as fast as possible until a halt is detected.
+
 ## Assembler
 
 The assembler can be used with the `fateful asm` or `fateful assemble` command to assembler f8ful assembly into f8ful machine code.
@@ -464,6 +471,9 @@ jnz 1
 
 ### Built-in Macros
 
+Built-in macros are a group of macros included by default in every program.
+The details of each macro can be found in (src/assembler/macros.asm)[./src/assembler/macros.asm].
+
 * [PUSH](#push-macro)
 * [POP](#pop-macro)
 * [PUSHA](#pusha-macro)
@@ -889,10 +899,23 @@ The input parameter provides the number of slots that the peripheral has been at
 #### Reading and Writing
 
 Peripherals can be written through a function with the signiture `void write(unsigned char, unsigned char)`.
+This function is called whenever the CPU writes to the given address or the address is `POKE`ed.
 The first parameter is the slot index that is being written to, and the second parameter is the value being written.
 
-Peripherals can be read from with a function with the signiture `unsigned char read(unsigned char)`
+Peripherals can be read from with a function with the signiture `unsigned char read(unsigned char)`.
+This function is called whenever the CPU reads from the given address or the address is `PEEK`ed at.
 The input parameter is the slot index that is being read from, and the return value should be the value at the slot.
+
+#### Drop
+
+Peripherals are dropped through a function with the signiture `void drop()`.
+This function is called when every address this peripheral is attached to is `DROP`ed, or the emulator is quit.
+This function *must* clean up any seperate threads before returning or the emulator will crash.
+
+#### Reset
+
+Peripherals are reset through a function with the signiture `void reset()`.
+This functions is called whenever the emulator resets the CPU.
 
 ### Errors
 

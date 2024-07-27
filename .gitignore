@@ -1,5 +1,5 @@
 target
-fateful-cache
+.fateful-cache
 zig-cache
 zig-out
 /.vscode
