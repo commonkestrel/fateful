@@ -1067,8 +1067,7 @@ dependencies = [
 [[package]]
 name = "minifb"
 version = "0.27.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0c470a74618b43cd182c21b3dc1e6123501249f3bad9a0085e95d1304ca2478"
+source = "git+https://github.com/emoon/rust_minifb?rev=d62b0f5#d62b0f506191539b1baed0f658d8fa324e9efb67"
 dependencies = [
  "cc",
  "dlib",

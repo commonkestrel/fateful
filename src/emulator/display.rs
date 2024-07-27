@@ -41,8 +41,8 @@ impl TextBuffer {
 
 async fn run_handle(buffer: BufferPtr) {
     let mut opts = WindowOptions::default();
-    // opts.scale = Scale::FitScreen;
-    opts.scale_mode = ScaleMode::UpperLeft;
+    opts.scale = Scale::FitScreen;
+    opts.scale_mode = ScaleMode::AspectRatioStretch;
     opts.resize = true;
     
     let mut window =

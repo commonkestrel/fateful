@@ -14,20 +14,18 @@ rustPlatform.buildRustPackage rec {
     hash = "sha256-910xg3yq5Ne6XhJ71RVqZW2rAdPciYvIv+Zj5KG86Y0=";
   };
 
-  nativeBuildInputs = with pkgs; [
+  buildInputs = with pkgs; [
     pkg-config
     openssl.dev
     openssl
     systemd
-  ];
-
-  buildInputs = with pkgs; [
-    openssl.dev
-    openssl
-    systemd
-	wayland
-	libGL
-	libxkbcommon
+    wayland
+    libGL
+    xorg.libX11
+    xorg.libXrandr
+    xorg.libXi
+    xorg.libXcursor
+    libxkbcommon
   ];
 
   cargoLock = {
