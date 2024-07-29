@@ -1,4 +1,4 @@
-@define TEXT_BUFFER 0xF800
+@define TEXT_BUFFER 0xF000
 @define SCREEN_WIDTH 80
 @define SCREEN_HEIGHT 25
 @define BOX_WIDTH (SCREEN_WIDTH - 2)
@@ -12,6 +12,8 @@
 @define TL_CORNER 0xC9
 @define WALL 0xBA
 @define DASH 0xCD
+
+@define STYLE 0x0F
 
 /// math = https://github.com/commonkestrel/fateful_math
 @include <math/mul.asm>
@@ -137,14 +139,19 @@ draw_character:
     push A, C; save X coordinate and character
 
     push B, 0, SCREEN_WIDTH, 0
-    call [mul16] ; get Y offset
-    pop H, L ; get value
+    call [mul16] ; calculate Y offset
+    pop H, L ; get value of Y offset
 
     pop C, A ; get character and X coordinate
 
-    add16 H, L, (TEXT_BUFFER >> 8), (TEXT_BUFFER & 0xFF) ; Shift address to text-buffer space
     add16 H, L, 0, A ; add X to address
+    add16 H, L, H, L ; double address to account for modifier bytes
+    add16 H, L, (TEXT_BUFFER >> 8), (TEXT_BUFFER & 0xFF) ; Shift address to text-buffer space
 
+    st C
+
+    inc H, L
+    mv C, STYLE
     st C
 
     ret

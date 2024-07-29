@@ -1,41 +1,84 @@
-use std::{
-    cell::UnsafeCell,
-    marker::PhantomData,
-    pin::Pin,
-    sync::atomic::{AtomicU16, AtomicU8, Ordering},
-};
+use std::pin::Pin;
+use std::str::FromStr;
 
 use async_std::task::JoinHandle;
-use minifb::{Scale, ScaleMode, WindowOptions};
+use minifb::{Icon, Scale, ScaleMode, WindowOptions};
 
 const FONT: &[u8; 1 << 12] = include_bytes!("../vga-font.rom");
 const WIDTH: usize = 640;
 const HEIGHT: usize = 400;
 
+const COLORS: [u32; 16] = [
+    0x000000,
+    0x0000aa,
+    0x00aa00,
+    0x00aaaa,
+    0xaa0000,
+    0xaa00aa,
+    0xaa5500,
+    0xaaaaaa,
+    0x555555,
+    0x5555ff,
+    0x55ff55,
+    0x55ffff,
+    0xff5555,
+    0xff55ff,
+    0xffff55,
+    0xffffff,
+];
+
 #[derive(Debug)]
 pub struct TextBuffer {
-    data: Pin<Box<[u8; 1 << 12]>>,
+    chars: Pin<Box<[u8; 1 << 11]>>,
+    modifiers: Pin<Box<[u8; 1 << 11]>>,
     handle: JoinHandle<()>,
 }
 
-struct BufferPtr(*const [u8; 1 << 12]);
+struct BufferPtr{
+    chars: *const [u8; 1 << 11],
+    modifiers: *const [u8; 1 << 11],
+}
+
 unsafe impl Send for BufferPtr {}
 
 impl TextBuffer {
     pub fn spawn() -> TextBuffer {
-        let data = Box::pin([0; 1 << 12]);
+        let chars = Box::pin([0; 1 << 11]);
+        let modifiers = Box::pin([0; 1 << 11]);
 
-        let handle = async_std::task::spawn(run_handle(BufferPtr(&*data)));
+        let handle = async_std::task::spawn(run_handle(BufferPtr{
+            chars: &*chars,
+            modifiers: &*modifiers,
+        }));
 
-        TextBuffer { data, handle }
+        TextBuffer { chars, modifiers, handle }
     }
 
     pub fn get(&self, addr: u16) -> u8 {
-        self.data[addr as usize]
+        if addr % 2 == 0 {
+            let sub_index = (addr >> 1) as usize;
+            self.chars[sub_index]
+        } else {
+            let sub_index = (addr >> 1) as usize;
+            self.modifiers[sub_index]
+        }
     }
 
     pub fn set(&mut self, addr: u16, data: u8) {
-        self.data[addr as usize] = data;
+        println!("setting {addr} to {data}");
+
+        if addr % 2 == 0 {
+            let sub_index = (addr >> 1) as usize;
+            self.chars[sub_index] = data;
+        } else {
+            let sub_index = (addr >> 1) as usize;
+            self.modifiers[sub_index] = data;
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.chars.fill(0);
+        self.modifiers.fill(0);
     }
 }
 
@@ -47,6 +90,12 @@ async fn run_handle(buffer: BufferPtr) {
     
     let mut window =
         minifb::Window::new("f8ful", WIDTH, HEIGHT, opts).expect("should be able to create window");
+    // match the VGA standard
+    window.set_target_fps(75);
+    if let Some(icon) = get_icon() {
+        window.set_icon(icon);
+    }
+
     let mut fb = [0x00000000; WIDTH * HEIGHT];
 
     while window.is_open() {
@@ -58,15 +107,19 @@ async fn run_handle(buffer: BufferPtr) {
                 let char_x = x / 8;
                 let char_y = y / 16;
                 let char_idx = char_x + char_y * WIDTH / 8;
-                let character = 0x10;
-                let character = unsafe { (*buffer.0)[char_idx] };
+                let (character, modifier) = unsafe {(
+                    (*buffer.chars)[char_idx], 
+                    (*buffer.modifiers)[char_idx]
+                )};
 
                 let font_addr = ((character as usize) << 4) + font_y;
                 let lit = FONT[font_addr] & (1 << (7 - font_x)) > 0;
 
                 // This part isn't part of the actual CPU,
-                // the real value will be transmitted via wire instead of stored.
-                fb[x + y * WIDTH] = if lit { 0x00FFFFFF } else { 0x00000000 };
+                // the real value will be transmitted via VGA instead of stored.
+                let fg = COLORS[(modifier & 0xf) as usize];
+                let bg = COLORS[(modifier >> 4) as usize];
+                fb[x + y * WIDTH] = if lit { fg } else { bg };
             }
         }
 
@@ -75,4 +128,9 @@ async fn run_handle(buffer: BufferPtr) {
             .expect("unable to write to window");
     }
     
+}
+
+fn get_icon() -> Option<Icon> {
+    // TODO: actually add icon
+    None
 }

@@ -604,7 +604,7 @@ impl State {
     fn init(program: Box<[u8]>) -> Self {
         State {
             pc: 0,
-            sp: 0xF7FF,
+            sp: 0xEFFF,
             ctrl: Control::default(),
             sreg: SReg::empty(),
             timer: 0,
@@ -665,8 +665,8 @@ impl State {
             )
         } else if cw.contains(ControlWord::LA) {
             match self.addr {
-                0x0000..=0xF7FF => self.mem[self.addr as usize],
-                0xF800..=0xFFCF => self.text_buffer.get(self.addr - 0xF800),
+                0x0000..=0xEFFF => self.mem[self.addr as usize],
+                0xF000..=0xFFCF => self.text_buffer.get(self.addr - 0xF000),
                 0xFFD0..=0xFFFC => match self.peripherals.get(&((self.addr - 0xFFC0) as u8)) {
                     Some(periph) => unsafe {
                         if let Ok(stateful_read) =
@@ -708,11 +708,11 @@ impl State {
 
         if cw.contains(ControlWord::SA) {
             match self.addr {
-                0x0000..=0xF7FF => {
+                0x0000..=0xEFFF => {
                     self.mem[self.addr as usize] = bus;
                 }
-                0xF800..=0xFFCF => {
-                    self.text_buffer.set(self.addr - 0xF800, bus);
+                0xF000..=0xFFCF => {
+                    self.text_buffer.set(self.addr - 0xF000, bus);
                 }
                 0xFFD0..=0xFFFC => match self.peripherals.get(&((self.addr - 0xFFC0) as u8)) {
                     Some(periph) => unsafe {
@@ -845,9 +845,10 @@ impl State {
         self.ctrl.clock = 0;
         self.mem.fill(0);
         self.sreg = SReg::from_bits_retain(0);
-        self.sp = 0xF7FF;
+        self.sp = 0xEFFF;
         self.alu.clear();
         self.bank.clear();
+        self.text_buffer.reset();
 
         for periph in self.peripherals.values() {
             unsafe {
