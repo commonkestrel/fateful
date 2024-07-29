@@ -1124,7 +1124,7 @@ pub async fn emulate(mut args: EmulatorArgs) -> Result<(), EmulatorError> {
                 state.halt();
             }
         } else {
-            async_std::task::sleep(Duration::from_millis(1)).await;
+            async_std::task::sleep(Duration::from_millis(10)).await;
         }
     }
 

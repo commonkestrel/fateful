@@ -1,4 +1,6 @@
-use std::pin::Pin;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
+use std::{pin::Pin, sync::atomic::AtomicBool};
 use std::str::FromStr;
 
 use async_std::task::JoinHandle;
@@ -31,12 +33,14 @@ const COLORS: [u32; 16] = [
 pub struct TextBuffer {
     chars: Pin<Box<[u8; 1 << 11]>>,
     modifiers: Pin<Box<[u8; 1 << 11]>>,
+    modified: Arc<AtomicBool>,
     handle: JoinHandle<()>,
 }
 
-struct BufferPtr{
+struct BufferPtr {
     chars: *const [u8; 1 << 11],
     modifiers: *const [u8; 1 << 11],
+    modified: Arc<AtomicBool>,
 }
 
 unsafe impl Send for BufferPtr {}
@@ -45,13 +49,15 @@ impl TextBuffer {
     pub fn spawn() -> TextBuffer {
         let chars = Box::pin([0; 1 << 11]);
         let modifiers = Box::pin([0; 1 << 11]);
+        let modified = Arc::new(AtomicBool::new(true));
 
         let handle = async_std::task::spawn(run_handle(BufferPtr{
             chars: &*chars,
             modifiers: &*modifiers,
+            modified: modified.clone(),
         }));
 
-        TextBuffer { chars, modifiers, handle }
+        TextBuffer { chars, modifiers, modified, handle }
     }
 
     pub fn get(&self, addr: u16) -> u8 {
@@ -65,7 +71,7 @@ impl TextBuffer {
     }
 
     pub fn set(&mut self, addr: u16, data: u8) {
-        println!("setting {addr} to {data}");
+        self.modified.store(true, Ordering::Relaxed);
 
         if addr % 2 == 0 {
             let sub_index = (addr >> 1) as usize;
@@ -90,7 +96,7 @@ async fn run_handle(buffer: BufferPtr) {
     
     let mut window =
         minifb::Window::new("f8ful", WIDTH, HEIGHT, opts).expect("should be able to create window");
-    // match the VGA standard
+    // the actual VGA standard is 75, but this function is very resource intensive and should not run constantly
     window.set_target_fps(75);
     if let Some(icon) = get_icon() {
         window.set_icon(icon);
@@ -99,35 +105,39 @@ async fn run_handle(buffer: BufferPtr) {
     let mut fb = [0x00000000; WIDTH * HEIGHT];
 
     while window.is_open() {
-        for y in 0..HEIGHT {
-            for x in 0..WIDTH {
-                let font_x = x % 8;
-                let font_y = y % 16;
+        if buffer.modified.load(Ordering::Relaxed) {
+            buffer.modified.store(false, Ordering::Relaxed);
+            for y in 0..HEIGHT {
+                for x in 0..WIDTH {
+                    let font_x = x % 8;
+                    let font_y = y % 16;
 
-                let char_x = x / 8;
-                let char_y = y / 16;
-                let char_idx = char_x + char_y * WIDTH / 8;
-                let (character, modifier) = unsafe {(
-                    (*buffer.chars)[char_idx], 
-                    (*buffer.modifiers)[char_idx]
-                )};
+                    let char_x = x / 8;
+                    let char_y = y / 16;
+                    let char_idx = char_x + char_y * WIDTH / 8;
+                    let (character, modifier) = unsafe {(
+                        (*buffer.chars)[char_idx], 
+                        (*buffer.modifiers)[char_idx]
+                    )};
 
-                let font_addr = ((character as usize) << 4) + font_y;
-                let lit = FONT[font_addr] & (1 << (7 - font_x)) > 0;
+                    let font_addr = ((character as usize) << 4) + font_y;
+                    let lit = FONT[font_addr] & (1 << (7 - font_x)) > 0;
 
-                // This part isn't part of the actual CPU,
-                // the real value will be transmitted via VGA instead of stored.
-                let fg = COLORS[(modifier & 0xf) as usize];
-                let bg = COLORS[(modifier >> 4) as usize];
-                fb[x + y * WIDTH] = if lit { fg } else { bg };
+                    // This part isn't part of the actual CPU,
+                    // the real value will be transmitted via VGA instead of stored.
+                    let fg = COLORS[(modifier & 0xf) as usize];
+                    let bg = COLORS[(modifier >> 4) as usize];
+                    fb[x + y * WIDTH] = if lit { fg } else { bg };
+                }
             }
-        }
 
-        window
-            .update_with_buffer(&fb, WIDTH, HEIGHT)
-            .expect("unable to write to window");
+            window
+                .update_with_buffer(&fb, WIDTH, HEIGHT)
+                .expect("unable to write to window");
+        } else {
+            window.update();
+        }
     }
-    
 }
 
 fn get_icon() -> Option<Icon> {
