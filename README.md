@@ -1,4 +1,4 @@
-<img src="https://raw.githubusercontent.com/commonkestrel/fateful/main/misc/fateful_icon.png?sanitize=true" alt="Fateful logo" width="100" align="left" />
+<img src="https://raw.githubusercontent.com/commonkestrel/fateful/master/misc/fateful_icon.png" alt="Fateful logo" width="100" align="left" />
 
 # Fateful
 ![GitHub Workflow Status (with event)](https://img.shields.io/github/actions/workflow/status/commonkestrel/fateful/rust.yml)
