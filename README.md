@@ -5,22 +5,37 @@
 
 Fateful is a CLI tool foring with my custom CPU, F8ful.
 It contains an emulator and an assembler.
-Fateful can be installed through [cargo](https://github.com/rust-lang/cargo) via `cargo install --git https://github.com/commonkestrel/fateful`.
+Fateful can be installed via [cargo](https://github.com/rust-lang/cargo): 
+```bash 
+cargo install --git https://github.com/commonkestrel/fateful
+```
 
 Running a program has two steps: assembly and emulation.
-To assemble a program, run `fateful assemble <program>.asm -o <program>.bin`
-If this is successful, you can emulate the program with `fateful emulate <program>.bin`
+To assemble a program, run the `assemble` or `asm` command: 
+```bash
+fateful assemble <program>.asm -o <program>.bin
+```
+
+If this is successful, you can emulate the program with the `emulate` or `emu` command: 
+```bash
+fateful emulate <program>.bin
+```
+
 The emulator is a REPL that contains various commands expalined [below](#emulator).
 The most important command for emulating a program is `RUN`.
 Inputting `RUN 0` will run the assembly program as fast as possible until a halt is detected.
 
 ## Assembler
 
-The assembler can be used with the `fateful asm` or `fateful assemble` command to assembler f8ful assembly into f8ful machine code.
+The assembler can be used with the `fateful asm` or `fateful assemble` command to assemble fateful assembly into f8ful machine code.
 The input and output are both optional, and default to `stdin` and `stdout` respectively.
 Input is positional, being the first argument, and the output can be specified with the `-o` or `--output` flag.
 
 ### Instruction Set
+
+Fateful assembly contains just 16 instructions,
+including arithmetic, memory operations, a hardware stack, 
+and a `jnz` (Jump if not zero) instruction making the CPU turing complete.
 
 0. [ADD](#add)
 0. [SUB](#sub)
@@ -504,269 +519,323 @@ The details of each macro can be found in (src/assembler/macros.asm)[./src/assem
 
 #### PUSH Macro
 
-`push r0: reg|imm, r1: reg|imm`
-
+```asm
+push r0: reg|imm, r1: reg|imm
+```
 Pushes two values to the stack in ascending parameter order.
 
-`push r0: reg|imm, r1: reg|imm, r2: reg|imm`
-
+```asm
+push r0: reg|imm, r1: reg|imm, r2: reg|imm
+```
 Pushes three values to the stack in ascending parameter order.
 
-`push r0: reg|imm, r1: reg|imm, r2: reg|imm, r3: reg|imm`
-
+```asm
+push r0: reg|imm, r1: reg|imm, r2: reg|imm, r3: reg|imm
+```
 Pushes four values to the stack in ascending parameter order.
 
-`push r0: reg|imm, r1: reg|imm, r2: reg|imm, r3: reg|imm, r4: reg|imm`
-
+```asm
+push r0: reg|imm, r1: reg|imm, r2: reg|imm, r3: reg|imm, r4: reg|imm
+```
 Pushes five values to the stack in ascending parameter order.
 
-`push r0: reg|imm, r1: reg|imm, r2: reg|imm, r3: reg|imm, r4: reg|imm, r5: reg|imm`
-
+```asm
+push r0: reg|imm, r1: reg|imm, r2: reg|imm, r3: reg|imm, r4: reg|imm, r5: reg|imm
+```
 Pushes six values to the stack in ascending parameter order.
 
 #### POP Macro
 
-`pop r0: reg|imm, r1: reg|imm`
-
+```asm
+pop r0: reg|imm, r1: reg|imm
+```
 Pops two values from the stack in ascending parameter order.
 
-`pop r0: reg|imm, r1: reg|imm, r2: reg|imm`
-
+```asm
+pop r0: reg|imm, r1: reg|imm, r2: reg|imm
+```
 Pops three values from the stack in ascending parameter order.
 
-`pop r0: reg|imm, r1: reg|imm, r2: reg|imm, r3: reg|imm`
-
+```asm
+pop r0: reg|imm, r1: reg|imm, r2: reg|imm, r3: reg|imm
+```
 Pops four values from the stack in ascending parameter order.
 
-`pop r0: reg|imm, r1: reg|imm, r2: reg|imm, r3: reg|imm, r4: reg|imm`
-
+```asm
+pop r0: reg|imm, r1: reg|imm, r2: reg|imm, r3: reg|imm, r4: reg|imm
+```
 Pops five values from the stack in ascending parameter order.
 
-`pop r0: reg|imm, r1: reg|imm, r2: reg|imm, r3: reg|imm, r4: reg|imm, r5: reg|imm`
-
+```asm
+pop r0: reg|imm, r1: reg|imm, r2: reg|imm, r3: reg|imm, r4: reg|imm, r5: reg|imm
+```
 Pops six values from the stack in ascending parameter order.
 
 #### PUSHA Macro
 
-`pusha`
-
+```asm
+pusha
+```
 Pushes all six general-purpose registers to the stack in ascending order.
 Designed to be paired with the `popa` macro.
 
 #### POPA Macro
 
-`popa` 
-
+```asm
+popa
+```
 Pops the top 6 values on the stack into the six general-purpose registers in decending order.
 Designed to be paired with the `pusha` macro.
 
 #### JMP Macro
 
-`jmp`
-
+```asm
+jmp
+```
 Jumps to the location pointed to by the HL register unconditionally.
 
-`jmp location: label`
-
+```asm
+jmp location: label
+```
 Jumps to *location* unconditionally.
 
 #### JNZ Macro
 
-`jnz condition: reg|imm, location:label`
-
+```asm
+jnz condition: reg|imm, location:label
+```
 Jumps to *location* if *condition* is not zero.
 
 #### JLT Macro
 
-`jlt`
-
+```asm
+jlt
+```
 Jumps to the address pointed to by the HL registers if the `L` flag in the status register is set.
 
-`jlt location: label`
-
+```asm
+jlt location: label
+```
 Jumps to *location* if the `L` flag in the status register is set.
 
-`jlt x: reg, y: reg|imm`
-
+```asm
+jlt x: reg, y: reg|imm
+```
 Jumps to the location pointed to by the HL registers if *x* < *y*.
 
-`jlt x: reg, y: reg|imm, location: label`
-
+```asm
+jlt x: reg, y: reg|imm, location: label
+```
 Jumps to *location* if *x* < *y*.
 
 #### JLE Macro
 
-`jle`
-
+```asm
+jle
+```
 Jumps to the address pointed to by the HL registers if the `L` or `E` flags in the status register are set.
 
-`jle location: label`
-
+```asm
+jle location: label
+```
 Jumps to *location* if the `L` or `E` flags in the status register are set.
 
-`jle x: reg, y: reg|imm`
-
+```asm
+jle x: reg, y: reg|imm
+```
 Jumps to the location pointed to by the HL registers if *x* <= *y*.
 
-`jle x: reg, y: reg|imm, location: label`
-
+```asm
+jle x: reg, y: reg|imm, location: label
+```
 Jumps to *location* if *x* <= *y*.
 
 #### JGT Macro
 
-`jgt`
-
+```asm
+jgt
+```
 Jumps to the address pointed to by the HL registers if the `G` flag in the status register is set.
 
-`jgt location: label`
-
+```asm
+jgt location: label
+```
 Jumps to *location* if the `G` flag in the status register is set.
 
-`jgt x: reg, y: reg|imm`
-
+```asm
+jgt x: reg, y: reg|imm
+```
 Jumps to the location pointed to by the HL registers if *x* > *y*.
 
-`jgt x: reg, y: reg|imm, location: label`
-
+```asm
+jgt x: reg, y: reg|imm, location: label
+```
 Jumps to *location* if *x* > *y*.
 
 #### JGE Macro
 
-`jge`
-
+```asm
+jge
+```
 Jumps to the address pointed to by the HL registers if the `G` or `E` flags in the status register are set.
 
-`jge location: label`
-
+```asm
+jge location: label
+```
 Jumps to *location* if the `G` or `E` flags in the status register are set.
 
-`jge x: reg, y: reg|imm`
-
+```asm
+jge x: reg, y: reg|imm
+```
 Jumps to the location pointed to by the HL registers if *x* >= *y*.
 
-`jge x: reg, y: reg|imm, location: label`
-
+```asm
+jge x: reg, y: reg|imm, location: label
+```
 Jumps to *location* if *x* >= *y*.
 
 #### JEQ Macro
 
-`jeq`
-
+```asm
+jeq
+```
 Jumps to the address pointed to by the HL registers if the `E` flag in the status register is set.
 
-`jeq location: label`
-
+```asm
+jeq location: label
+```
 Jumps to *location* if the `E` flag in the status register is set.
 
-`jeq x: reg, y: reg|imm`
-
+```asm
+jeq x: reg, y: reg|imm
+```
 Jumps to the location pointed to by the HL registers if *x* == *y*.
 
-`jeq x: reg, y: reg|imm, location: label`
-
+```asm
+jeq x: reg, y: reg|imm, location: label
+```
 Jumps to *location* if *x* == *y*.
 
 #### JZ Macro
 
-`jz condition: reg|imm, location: label`
-
+```asm
+jz condition: reg|imm, location: label
+```
 Jumps to *location* if *condition* is 0.
 
 #### CALL Macro
 
-`call`
-
+```asm
+call
+```
 Pushes the return address to the stack and jumps to the address pointed to by the HL registers.
 Designed to be paired with the `ret` macro.
 
-`call location: label`
-
+```asm
+call location: label
+```
 Pushes the return address to the stack and jumps to *location*.
 Designed to be paired with the `ret` macro.
 
 #### RET Macro
 
-`ret`
-
+```asm
+ret
+```
 Jumps to the address stored at the *top* of the stack.
 
 #### MV16 Macro
 
-`mv16 high: reg, low: reg, imm: imm`
+```asm
+mv16 high: reg, low: reg, imm: imm
+```
 
 Moves a 16-bit immediate integer into the provided registers.
 
 #### ADD16 Macro
 
-`add16 h0: reg, l0: reg, h1: reg|imm, l1: reg|imm`
-
+```asm
+add16 h0: reg, l0: reg, h1: reg|imm, l1: reg|imm
+```
 Adds two 16-bit integers.
 *h0* and *l0* make up the high and low bytes of the first operand,
 with *h1* and *l1* making up the high and low bytes of the second operand.
 
 #### SUB16 Macro
 
-`sub16 h0: reg, l0: reg, h1: reg|imm, l1: reg|imm`
+```asm
+sub16 h0: reg, l0: reg, h1: reg|imm, l1: reg|imm
+```
 Subtracts two 16-bit integers.
 *h0* and *l0* make up the high and low bytes of the first operand,
 with *h1* and *l1* making up the high and low bytes of the second operand.
 
 #### INC Macro
 
-`inc reg: reg`
-
+```asm
+inc reg: reg
+```
 Adds 1 to the value contained in *reg*, storing the result back in *reg*.
 
-`inc high: reg, low: reg`
-
+```asm
+inc high: reg, low: reg
+```
 Adds 1 to the 16-bit value contained in *high* and *low*,
 storing the result back in *high* and *low*.
 
 #### DEC Macro
 
-`dec reg: reg`
-
+```asm
+dec reg: reg
+```
 Subtracts 1 from the value contained in *reg*, storing the result back in *reg*.
 
-`dec high: reg, low: reg`
-
+```asm
+dec high: reg, low: reg
+```
 Subtracts 1 from the 16-bit value contained in *high* and *low*,
 storing the result back in *high* and *low*.
 
 #### NOT Macro
 
-`not reg: reg`
-
+```asm
+not reg: reg
+```
 Performs a bitwise NOT operation on *reg*, storing the result back in *reg*.
 
 #### AND Macro
 
-`and x: reg, y: reg|imm`
-
+```asm
+and x: reg, y: reg|imm
+```
 Performs a bitwise AND operation on *x* and *y*, storing the result in *x*.
 
 #### XOR Macro
 
-`and x: reg, y: reg|imm`
-
+```asm
+and x: reg, y: reg|imm
+```
 Performs a bitwise XOR operation on *x* and *y*, storing the result in *x*.
 
 #### SHL Macro
 
-`shl reg: reg`
-
+```asm
+shl reg: reg
+```
 Performs a logical shift left on *reg*, storing the result back in *reg*
 
 #### NOP Macro
 
-`nop`
-
+```asm
+nop
+```
 Performs an operation that has no effect, taking 4 clock cycles (the same as `ADD`).
 
 #### USE Macro
 
-`use label: label|ident`
-
+```asm
+use label: label|ident
+```
 Eliminates the `warning: unused label definition` message for *label*.
 
 ## Emulator
@@ -877,15 +946,69 @@ Syntax: `HELP`
 
 Prints a help message detailing the REPL's commands.
 
+### MMIO
+
+There are several locations in memory with mapped IO.
+These memory-mapped addresses allow programs to interact with hardware directly.
+The top 48 memory addresses are reserved for various peripherals,
+with two implemented in the emulator.
+
+ * `0xFFFF` is where the status register (SREG) resides.
+ * `0xFFFE` is the low byte of the stack pointer.
+ * `0xFFFD` is the high byte of the stack pointer.
+
+Below these reserved addresses, the address range `0xF000` through `0xFFCF` are reserved for the video memory.
+This address range is functionally similar to VGA text mode in x86 processors,
+with an 85x20 character screen.
+
+The low (character) byte is the code point.
+The VGA text follows code-page 737 seen below:
+
+![Code-page 737](./misc/characters.png)
+
+The second byte is the attribute or modifier byte,
+describing the foreground and background colors.
+The lower nibble describes the foreground color,
+while the upper nibble describes the background color.
+
+![An example of all foreground and background colors](./misc/colors.png)
+*<sub>An example of all foreground and background colors</sub>*
+
 ## Tests
 
+Fateful has a built-in test suite that can make it easy to make sure
+your program actually does what it is supposed to.
+You can run tests on assembly programs with the `test` command:
+```bash
+fateful test <program>.asm
+```
+
+The test command will check the contents of registers after halting if specified in the program.
+These checks are specified in rich comments (`///`) similar to libraries.
+For example, these are the checks included in the `fib.asm` example:
+```rust
+/// a: 0x0D
+/// b: 0x15
+/// c: 0x00
+/// d: 0x15
+```
+
+These are only read by the test suite, and will be checked after the emulator halts.
+In this example, the test-runner will assert that the content of the A register is `0x0D`,
+the B register is `0x15`, the C register is `0x00`, and the D register is `0x15`.
+If these assertions fail, the test is marked as failing.
+
+The test command also includes a `--timeout` flag, which defaults to `500ms`.
+If the emulator does not detect a halt in this time,
+the emulator will exit and the test will be marked as failing.
+
 ## Peripherals
+
 Peripherals are a way to extend the emulator,
 simulating a memory-mapped peripheral.
 This is done through the use of dynamic library loading,
 so you can create a peripheral in any language that supports the C ABI.
 Peripherals can be attached to one or more slots in the top 48 bytes of RAM.
-
 
 ### Stateless Peripherals
 
@@ -919,10 +1042,38 @@ This function *must* clean up any seperate threads before returning or the emula
 Peripherals are reset through a function with the signiture `void reset()`.
 This functions is called whenever the emulator resets the CPU.
 
+### Stateful Peripherals
+
+Stateful peripherals are a way to offload managing state to the emulator.
+They essentially allow a peripheral to hand off a heap-allocated pointer to that peripheral's state.
+This is especially important if you are spawning multiple threads and need to rejoin the main thread,
+or if you want to have multiple instances of the same peripheral.
+
+There is a Rust crate - [`fateful_peripheral`](https://github.com/commonkestrel/fateful_peripheral) -
+that handles all of the pointer magic behind the scenes, allowing you to stay completely in the `safe` world.
+
+#### Initialization
+
+When a stateful peripheral is initialized through a function of the signiture `*void stateful_init(char)`,
+it must return a pointer to the state's location.
+**Warning:** This pointer *must* be stored on the heap,
+otherwise the emulator *will* Segfault.
+Other than the pointer return,
+the rest of the function should be the same as its stateless counterpart.
+
+If an error occurs during the setup,
+the process for reporting these is explained in [Errors](#errors).
+
+#### Reads, Writes, Drops, and Resets
+
+Reading, writing, dropping, and resetting stateful peripherals is functionally the same as stateless,
+but each function has an extra `stateless_` prepended to its identifier,
+as well as a pointer parameter (`*void`) at the start of each functions's parameters.
+
 ### Errors
 
 Errors are only checked upon initialization - after both `init` and `stateful_init`.
-If either of these functions return a non-zero value,
+If either `init` returns a non-zero value or `stateful_init` returns a null pointer,
 the emulator will check for a function with the signiture `int last_error_length()`.
 If this function exists, the emulator will then check for a function with the signiture `*char last_error()`.
 `last_error_length` should return the length of the ASCII string pointed to by the result of `last_error`.
@@ -931,6 +1082,4 @@ If this function exists, the emulator will then check for a function with the si
 
 Peripherals can optionally have a name that will displayed when the emulator is `DUMP`ed.
 This must be supplied by a function with the following signiture: `*char name()`.
-
-There is a Rust crate - ([`fateful_peripheral`](https://github.com/commonkestrel/fateful_peripheral)) -
-designed to make creating peripherals easy.
+The returned pointer must point to a null-terminated ASCII string.
