@@ -3,8 +3,8 @@
 # Fateful
 ![GitHub Workflow Status (with event)](https://img.shields.io/github/actions/workflow/status/commonkestrel/fateful/rust.yml)
 
-Fateful is a CLI tool foring with my custom CPU, F8ful.
-It contains an emulator and an assembler.
+Fateful is a CLI tool foring with my homebrew CPU, F8ful.
+It contains an [emulator](#emulator) and an [assembler](#assembler), as well as a full [test suite](#tests).
 Fateful can be installed via [cargo](https://github.com/rust-lang/cargo): 
 ```bash 
 cargo install --git https://github.com/commonkestrel/fateful
@@ -231,6 +231,48 @@ parent:
 .local2:
     jmp [parent.local2]
 ```
+
+### Literals
+
+Both integer and string literals are valid in Fateful assembly.
+
+#### Integers
+
+Integer literals can be defined a few ways.
+An immediate integer can be a decimal (`100`),
+but they can also be defined with hexadecimal (`0x64`), octal (`0o144`), and binary (`0b01100100`).
+Integers can also be defined with a character, surrounded by single-quotes (`'`).
+Characters support the same escape sequences as [strings](#strings).
+Expressions can be used to make it more clear where a value comes from.
+Expressions must be able to be evaluated at compile-time, and are surrounded in parentheses.
+Expressions support adding, subtracting, multiplying, dividing, modulus, common bit-wise operators,
+and boolean expressions (with true as `1` and false as `0`).
+
+There is also a special symbol that can be used in place of an integer: `$`.
+The `$` symbol represents the value of the program counter at the start of the current instruction.
+This can be very useful for calculating relative jumps, and can be used anywhere an integer literal can.
+
+#### Strings
+
+Strings can only be used with the `@str` directive, and are surrounded in double-quotes (`"`).
+The compiler will automatically append a null-byte to every string literal.
+Strings support a variety of escape sequences:
+
+| Escape Sequence | Result                                  |
+|-----------------|-----------------------------------------|
+| `\n`            | Line Feed (`◙` in code-page 737)        |
+| `\\`            | `\`                                     |
+| `\"`            | `"`                                     |
+| `\'`            | `'`                                     |
+| `\0`            | Null character                          |
+| `\v`            | Vertical Tab (`♂` in code-page 737)     |
+| `\t`            | Horizontal Tab (`○` in code-page 737)   |
+| `\r`            | Carriage return (`♪` in code-page 737)  |
+| `\a`            | Bell (`•` in code-page 737)             |
+| `\b`            | Backspace (`◘` in code-page 737)        |
+| `\f`            | Form Feed (`♀` in code-page 737)        |
+| `\xFF`          | 8-bit character code (exactly 2 digits) |
+| `\o777`         | 8-bit character code (exactly 3 digits) |
 
 ### Preprocessor Directives
 
