@@ -25,6 +25,10 @@ The emulator is a REPL that contains various commands expalined [below](#emulato
 The most important command for emulating a program is `RUN`.
 Inputting `RUN 0` will run the assembly program as fast as possible until a halt is detected.
 
+Here's a demo of the `screen.asm` example:
+
+![Demo of the Fateful program](./misc/demo.gif)
+
 ## Assembler
 
 The assembler can be used with the `fateful asm` or `fateful assemble` command to assemble fateful assembly into f8ful machine code.
