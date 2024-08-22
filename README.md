@@ -5,7 +5,7 @@
 
 Fateful is a CLI tool for working with my homebrew CPU, F8ful.
 It contains an [emulator](#emulator) and an [assembler](#assembler), as well as a full [test suite](#tests).
-Fateful can be installed via [cargo](https://github.com/rust-lang/cargo): 
+Fateful can be installed via [cargo](https://github.com/rust-lang/cargo), but currently it does not compile on any version greater or equal to 1.80.0 as this update broke the `time` crate used by `shadow-rs`: 
 ```bash 
 cargo install --git https://github.com/commonkestrel/fateful
 ```
