@@ -3,7 +3,7 @@
 # Fateful
 ![GitHub Workflow Status (with event)](https://img.shields.io/github/actions/workflow/status/commonkestrel/fateful/rust.yml)
 
-Fateful is a CLI tool foring with my homebrew CPU, F8ful.
+Fateful is a CLI tool for working with my homebrew CPU, F8ful.
 It contains an [emulator](#emulator) and an [assembler](#assembler), as well as a full [test suite](#tests).
 Fateful can be installed via [cargo](https://github.com/rust-lang/cargo): 
 ```bash 
@@ -27,7 +27,7 @@ Inputting `RUN 0` will run the assembly program as fast as possible until a halt
 
 Here's a demo of the `screen.asm` example:
 
-![Demo of the Fateful program](./misc/demo.gif)
+![Demo of the Fateful program](https://github.com/commonkestrel/fateful/raw/master/misc/demo.gif)
 
 ## Assembler
 
