@@ -27,7 +27,7 @@ minifb = { git = "https://github.com/emoon/rust_minifb", rev = "d62b0f5" }
 modular-bitfield = "0.11"
 once_cell = "1.18"
 serialport = "4.3"
-shadow-rs = "0.26"
+shadow-rs = "0.33"
 thiserror = "1"
 
 [build-dependencies]
