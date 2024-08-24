@@ -10,6 +10,9 @@ Fateful can be installed via [cargo](https://github.com/rust-lang/cargo), but cu
 cargo install --git https://github.com/commonkestrel/fateful
 ```
 
+There is also a Logisim Evolution circuit simulation,
+which is located in the [`logisim`](https://github.com/commonkestrel/fateful/tree/master/logisim) directory.
+
 Running a program has two steps: assembly and emulation.
 To assemble a program, run the `assemble` or `asm` command: 
 ```bash
